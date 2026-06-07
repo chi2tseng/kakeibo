@@ -31,7 +31,7 @@ function ic(n,cls){ return `<span class="ms${cls?' '+cls:''}">${n}</span>`; }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function personBadge(p,i,lg){
   let style;
-  if(i===1) style='background:#fff;color:#163300;border:1.5px solid #163300';   // 乖：白底深綠邊
+  if(i===1) style='background:#fff;color:#163300;box-shadow:0 1px 3px rgba(20,21,15,.16)';   // 乖：白底＋淡陰影（無邊框）
   else { const bg=PERSON_CHART[i]!=null?PERSON_CHART[i]:'#163300'; const dark=['#163300','#054d28','#2f5d22','#4e8c33'].includes(bg); style=`background:${bg};color:${dark?'#fff':'#163300'}`; }
   return `<span class="who${lg?' lg':''}" style="${style}">${esc(p[0])}</span>`; }
 function personTag(p,i){ const av=personBadge(p,i); return p.length>1?`${av}<span>${esc(p)}</span>`:av; }
