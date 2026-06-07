@@ -15,7 +15,7 @@ const TABS = [
 const S = {
   tx:[], people:[], months:[],
   tab:'overview', period:'all', exclude:true,   // 預設排除初期費用＋語言學校等大筆一次性支出
-  search:'', fKinds:[], fCats:[], sortBy:'date', sortDir:'desc',
+  search:'', fKinds:[], fCats:[], sortBy:'date', sortDir:'desc', splitView:'all',
   lastSync:null, loading:true, error:null, charts:[],
 };
 
@@ -316,6 +316,8 @@ function viewCategory(c){
    ========================================================================= */
 function viewSplit(c){
   const people=c.people;
+  const mode=S.splitView||'all';            // all | common | personal
+  const showC=mode!=='personal', showP=mode!=='common';
   const mkRows=(entries,col)=>{ const mx=entries.length?entries[0][1]:1; return entries.map(([n,a])=>`<div class="row"><div class="ico sm">${ic(catIcon(n))}</div>
       <div class="main"><div class="l1"><span class="name">${esc(n)}</span><span class="amt">${fmtY(a)}</span></div>
       <div class="bar thin"><i style="width:${pct(a,mx).toFixed(1)}%;background:${col}"></i></div></div></div>`).join('')||emptyRow(); };
@@ -324,28 +326,27 @@ function viewSplit(c){
     const common=Object.entries(c.commonCatByPerson[p]||{}).sort((a,b)=>b[1]-a[1]);
     const personal=Object.entries(c.catByPerson[p]||{}).sort((a,b)=>b[1]-a[1]);
     const cTot=c.commonByPerson[p]||0, pTot=c.personalByPerson[p]||0;
+    let inner='';
+    if(showC) inner+=`<div class="subhead"><span>${ic('group')} 共同墊付</span><b>${fmtY(cTot)}</b></div><div class="rows">${mkRows(common,col)}</div>`;
+    if(showP) inner+=`<div class="subhead"${showC?' style="margin-top:14px"':''}><span>${ic('person')} 個人</span><b>${fmtY(pTot)}</b></div><div class="rows">${mkRows(personal,col)}</div>`;
     return `<div class="card">
-      <div class="card-head"><h3>${personTag(p,i)}</h3><span class="num" style="font-weight:700">${fmtY(cTot+pTot)}</span></div>
-      <div class="subhead"><span>${ic('group')} 共同墊付</span><b>${fmtY(cTot)}</b></div>
-      <div class="rows">${mkRows(common,col)}</div>
-      <div class="subhead" style="margin-top:14px"><span>${ic('person')} 個人</span><b>${fmtY(pTot)}</b></div>
-      <div class="rows">${mkRows(personal,col)}</div>
-    </div>`;
+      <div class="card-head"><h3>${personTag(p,i)}</h3><span class="num" style="font-weight:700">${fmtY((showC?cTot:0)+(showP?pTot:0))}</span></div>
+      ${inner}</div>`;
   }).join('');
   const maxC=Math.max(...people.map(p=>c.commonByPerson[p]||0),1);
   const commonBars=people.map((p,i)=>`<div class="ctrack"><div class="top"><b>${personTag(p,i)}</b><span class="num">${fmtY(c.commonByPerson[p]||0)}</span></div><div class="line"><i style="width:${pct(c.commonByPerson[p]||0,maxC)}%;background:${PERSON_CHART[i]}"></i></div></div>`).join('');
+  const seg=`<div class="seg">${[['all','全部'],['common','共同'],['personal','個人']].map(([k,l])=>`<button class="${mode===k?'active':''}" onclick="setSplitView('${k}')">${l}</button>`).join('')}</div>`;
+  const cCard=`<div class="card green"><div class="metric"><div class="label" style="color:var(--forest-2)">${ic('group')} 共同支出</div><div class="value">${fmtY(c.totalCommon)}</div><div class="foot" style="color:var(--forest-2)">佔 ${pct(c.totalCommon,c.total).toFixed(0)}%</div></div></div>`;
+  const pCard=`<div class="card dark"><div class="metric"><div class="label" style="color:rgba(255,255,255,.65)">${ic('person')} 個人支出</div><div class="value">${fmtY(c.totalPersonal)}</div><div class="foot" style="color:rgba(255,255,255,.6)">佔 ${pct(c.totalPersonal,c.total).toFixed(0)}%</div></div></div>`;
+  const barsCard=`<div class="card"><div class="card-head"><h3>${ic('account_balance_wallet')} 共同墊付</h3><span class="foot" style="font-size:12px;color:var(--mute)">「一起」付已平分</span></div><div class="contrib">${commonBars}</div></div>`;
   const html=`
-    <div class="page-head"><h2>共同 / 個人</h2><div class="sub">${periodName()}${S.exclude?' · 排除大筆':''}</div></div>
-    <div class="grid g-2">
-      <div class="card green"><div class="metric"><div class="label" style="color:var(--forest-2)">${ic('group')} 共同支出</div><div class="value">${fmtY(c.totalCommon)}</div><div class="foot" style="color:var(--forest-2)">佔 ${pct(c.totalCommon,c.total).toFixed(0)}%</div></div></div>
-      <div class="card dark"><div class="metric"><div class="label" style="color:rgba(255,255,255,.65)">${ic('person')} 個人支出</div><div class="value">${fmtY(c.totalPersonal)}</div><div class="foot" style="color:rgba(255,255,255,.6)">佔 ${pct(c.totalPersonal,c.total).toFixed(0)}%</div></div></div>
-    </div>
-    <div class="grid g-2">
-      <div class="card"><div class="chart donut"><canvas id="splitDonut"></canvas><div class="dc"><div><div class="l">共同佔</div><div class="v num">${pct(c.totalCommon,c.total).toFixed(0)}%</div></div></div></div></div>
-      <div class="card"><div class="card-head"><h3>${ic('account_balance_wallet')} 共同墊付</h3></div><div class="contrib">${commonBars}</div></div>
-    </div>
+    <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap"><div><h2>共同 / 個人</h2><div class="sub">${periodName()}${S.exclude?' · 排除大筆':''}</div></div>${seg}</div>
+    <div class="grid ${showC&&showP?'g-2':''}">${showC?cCard:''}${showP?pCard:''}</div>
+    ${mode==='all'
+      ? `<div class="grid g-2"><div class="card"><div class="chart donut"><canvas id="splitDonut"></canvas><div class="dc"><div><div class="l">共同佔</div><div class="v num">${pct(c.totalCommon,c.total).toFixed(0)}%</div></div></div></div></div>${barsCard}</div>`
+      : (showC?barsCard:'')}
     <div class="grid g-2">${personCards}</div>`;
-  const after=()=>{ const ctx=document.getElementById('splitDonut'); if(ctx) S.charts.push(new Chart(ctx,{type:'doughnut',
+  const after=()=>{ if(mode!=='all') return; const ctx=document.getElementById('splitDonut'); if(ctx) S.charts.push(new Chart(ctx,{type:'doughnut',
     data:{labels:['共同','個人'],datasets:[{data:[c.totalCommon,c.totalPersonal],backgroundColor:['#9fe870','#163300'],borderColor:'#fff',borderWidth:2,hoverOffset:6}]},
     options:{cutout:'72%',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:moneyTooltip(()=>c.total)}}})); };
   return [html,after];
@@ -485,5 +486,6 @@ function errorState(){ return `<div class="card" style="text-align:center;paddin
 /* global handlers */
 function go(tab){ S.tab=tab; window.scrollTo({top:0,behavior:'smooth'}); buildNav(); renderView(); }
 function setPeriod(m){ S.period=m; buildPeriod(); renderView(); window.scrollTo({top:0,behavior:'smooth'}); }
+function setSplitView(m){ S.splitView=m; renderView(); }
 
 document.addEventListener('DOMContentLoaded',boot);
