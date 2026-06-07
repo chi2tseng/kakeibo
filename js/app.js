@@ -106,14 +106,27 @@ function renderView(){
 function periodName(){ return S.period==='all'?'全部期間':mLabelFull(S.period); }
 function focusMonth(){ return S.period!=='all'?S.period:(S.months[S.months.length-1]||null); }
 
-/* pace (fair month comparison by elapsed days) */
-function pace(cAll){
+/* pace — smart month projection: recurring fixed costs don't prorate, variable prorate by
+   elapsed days, one-time big costs counted as-is. Always compared to last month's total. */
+function pace(){
   const fm=focusMonth(); if(!fm) return null;
-  const total=cAll.byMonth[fm]||0, days=elapsedDays(fm), daily=total/days;
-  const idx=S.months.indexOf(fm), prev=idx>0?S.months[idx-1]:null;
-  let deltaP=null, prevDaily=null;
-  if(prev){ const pt=cAll.byMonth[prev]||0, pd=monthDays(prev); prevDaily=pt/pd; if(prevDaily>0) deltaP=(daily-prevDaily)/prevDaily*100; }
-  return {fm,total,days,daily,projected:daily*monthDays(fm),current:isCurrentMonth(fm),deltaP,prev,prevDaily};
+  const dim=monthDays(fm), days=elapsedDays(fm), current=isCurrentMonth(fm);
+  const REC=CONFIG.recurringCats, ONE=CONFIG.excludeCats;
+  const sumMonth=(ym)=>{ let total=0,rec=0,one=0,vari=0;
+    for(const t of S.tx){ if(!t.date||t.date.ym!==ym) continue; total+=t.amt;
+      if(ONE.includes(t.cat)) one+=t.amt; else if(REC.includes(t.cat)) rec+=t.amt; else vari+=t.amt; }
+    return {total,rec,one,vari}; };
+  const cur=sumMonth(fm);
+  const idx=S.months.indexOf(fm), prevYm=idx>0?S.months[idx-1]:null;
+  const prev=prevYm?sumMonth(prevYm):null;
+  const recProj=prev?Math.max(cur.rec,prev.rec):cur.rec;            // 經常性：估計會跟上月一樣（或本月已發生的較多者）
+  const varProj=current?(cur.vari/days)*dim:cur.vari;              // 變動：按已過天數配速
+  const projected=recProj+varProj+cur.one;                         // ＋一次性照實
+  const prevTotal=prev?prev.total:null;
+  const deltaVsPrev=(prevTotal&&prevTotal>0)?(projected-prevTotal)/prevTotal*100:null;
+  return {fm,current,days,dim,total:cur.total,rec:cur.rec,vari:cur.vari,one:cur.one,
+    recProj,varProj,projected,prevYm,prevTotal,prevRec:prev?prev.rec:null,deltaVsPrev,
+    daily:cur.total/days,prevDaily:prev?prev.total/monthDays(prevYm):null};
 }
 function deltaBadge(d){
   if(d==null) return '';
@@ -135,11 +148,12 @@ function viewOverview(c,work,cAll){
        </div>`
     : `<div class="metric"><div class="label">${ic('swap_horiz')} 目前結算</div><div class="value" style="color:var(--down);display:flex;align-items:center;gap:8px">${ic('check_circle','fill')} 已結清</div></div>`;
 
-  const p=pace(cAll);
+  const p=pace();
   const paceCard=p?`<div class="metric">
-      <div class="label">${ic('calendar_month')} ${mLabel(p.fm)}${p.current?` · ${p.days}天`:''} ${deltaBadge(p.deltaP)}</div>
+      <div class="label">${ic('calendar_month')} ${mLabel(p.fm)}${p.current?` · ${p.days}/${p.dim} 天`:''} ${p.current&&p.deltaVsPrev!=null?deltaBadge(p.deltaVsPrev):''}</div>
       <div class="value">${fmtY(p.total)}</div>
-      <div class="foot">日均 ${fmtY(p.daily)}${p.prevDaily!=null?` · 上月日均 ${fmtY(p.prevDaily)}`:''}${p.current?` · 估整月 ${fmtY(p.projected)}`:''}</div>
+      <div class="foot">${[p.current?`估整月 ${fmtY(p.projected)}`:'',p.prevTotal!=null?`上月 ${fmtY(p.prevTotal)}`:''].filter(Boolean).join(' · ')}</div>
+      ${p.current?`<div class="foot" style="font-size:11.5px">經常性 ${fmtY(p.recProj)} ＋ 變動估 ${fmtY(p.varProj)}${p.one>0?` ＋ 一次性 ${fmtY(p.one)}`:''}</div>`:''}
     </div>`:'';
 
   const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -230,7 +244,7 @@ function viewSettle(c){
       </div>
       <div class="amt num"><span class="cur">¥</span>${fmt(st.amount)}</div>
       <div class="cap"><b>${esc(st.from)}</b> 要還給 <b>${esc(st.to)}</b></div>
-      <div class="alt">${S.exclude?'含大筆':'排除大筆'}：${ost?`<b>${esc(ost.from)} → ${esc(ost.to)} ${fmtY(ost.amount)}</b>`:'<b>已結清</b>'}</div>
+      <div class="scen">${S.exclude?'含大筆':'排除大筆'}：${ost?`<b>${esc(ost.from)} → ${esc(ost.to)} ${fmtY(ost.amount)}</b>`:'<b>已結清</b>'}</div>
     </div>`;
   }
 
@@ -299,13 +313,21 @@ function viewCategory(c){
    ========================================================================= */
 function viewSplit(c){
   const people=c.people;
-  const personCards=people.map((p,i)=>{
-    const cats=Object.entries(c.catByPerson[p]||{}).sort((a,b)=>b[1]-a[1]);
-    const tot=c.personalByPerson[p]||0, mx=cats.length?cats[0][1]:1;
-    const rows=cats.map(([n,a])=>`<div class="row"><div class="ico sm">${ic(catIcon(n))}</div>
+  const mkRows=(entries,col)=>{ const mx=entries.length?entries[0][1]:1; return entries.map(([n,a])=>`<div class="row"><div class="ico sm">${ic(catIcon(n))}</div>
       <div class="main"><div class="l1"><span class="name">${esc(n)}</span><span class="amt">${fmtY(a)}</span></div>
-      <div class="bar thin"><i style="width:${pct(a,mx).toFixed(1)}%;background:${PERSON_CHART[i]}"></i></div></div></div>`).join('')||emptyRow();
-    return `<div class="card"><div class="card-head"><h3>${personTag(p)} 個人</h3><span class="num" style="font-weight:700">${fmtY(tot)}</span></div><div class="rows">${rows}</div></div>`;
+      <div class="bar thin"><i style="width:${pct(a,mx).toFixed(1)}%;background:${col}"></i></div></div></div>`).join('')||emptyRow(); };
+  const personCards=people.map((p,i)=>{
+    const col=PERSON_CHART[i];
+    const common=Object.entries(c.commonCatByPerson[p]||{}).sort((a,b)=>b[1]-a[1]);
+    const personal=Object.entries(c.catByPerson[p]||{}).sort((a,b)=>b[1]-a[1]);
+    const cTot=c.commonByPerson[p]||0, pTot=c.personalByPerson[p]||0;
+    return `<div class="card">
+      <div class="card-head"><h3>${personTag(p)}</h3><span class="num" style="font-weight:700">${fmtY(cTot+pTot)}</span></div>
+      <div class="subhead"><span>${ic('group')} 共同墊付</span><b>${fmtY(cTot)}</b></div>
+      <div class="rows">${mkRows(common,col)}</div>
+      <div class="subhead" style="margin-top:14px"><span>${ic('person')} 個人</span><b>${fmtY(pTot)}</b></div>
+      <div class="rows">${mkRows(personal,col)}</div>
+    </div>`;
   }).join('');
   const maxC=Math.max(...people.map(p=>c.commonByPerson[p]||0),1);
   const commonBars=people.map((p,i)=>`<div class="ctrack"><div class="top"><b>${personTag(p)}</b><span class="num">${fmtY(c.commonByPerson[p]||0)}</span></div><div class="line"><i style="width:${pct(c.commonByPerson[p]||0,maxC)}%;background:${PERSON_CHART[i]}"></i></div></div>`).join('');
@@ -333,7 +355,7 @@ function viewMonthly(c,work,cAll){
   const months=S.months.slice(), data=months.map(m=>cAll.byMonth[m]||0), labels=months.map(mLabel);
   const fm=focusMonth();
   const fmWork=applyFilters(S.tx,{period:fm,exclude:S.exclude}), fmC=compute(fmWork,S.people);
-  const p=pace(cAll);
+  const p=pace();
   const fmCats=Object.entries(fmC.byCat).sort((a,b)=>b[1]-a[1]);
   const mx=fmCats.length?fmCats[0][1]:1;
   const detail=fmCats.map(([n,a])=>`<div class="row"><div class="ico sm">${ic(catIcon(n))}</div>
@@ -342,13 +364,13 @@ function viewMonthly(c,work,cAll){
   const chips=months.map(m=>`<button class="chip ${fm===m?'active':''}" onclick="setPeriod('${m}')">${mLabel(m)}</button>`).join('');
   const html=`
     <div class="page-head"><h2>月份趨勢</h2><div class="sub">每月總支出${S.exclude?' · 排除大筆':''}</div></div>
-    <div class="card"><div class="chart bars"><canvas id="monthBars"></canvas></div></div>
+    <div class="card"><div class="chart-scroll"><div class="chart bars" style="min-width:${Math.max(0,months.length*52)}px"><canvas id="monthBars"></canvas></div></div></div>
     <div class="card">
-      <div class="card-head"><h3>${ic('calendar_month')} ${mLabelFull(fm)} ${p&&p.current?deltaBadge(p.deltaP):''}</h3></div>
+      <div class="card-head"><h3>${ic('calendar_month')} ${mLabelFull(fm)} ${p&&p.current&&p.deltaVsPrev!=null?deltaBadge(p.deltaVsPrev):''}</h3></div>
       <div class="month-pick">${chips}</div>
       <div class="metric" style="margin-bottom:6px">
         <div class="value">${fmtY(fmC.total)}</div>
-        <div class="foot">${fmC.count} 筆 · 日均 ${fmtY((p&&p.fm===fm)?p.daily:fmC.total/Math.max(1,daySpan(fmWork)))}${p&&p.prevDaily!=null&&p.fm===fm?` · 上月日均 ${fmtY(p.prevDaily)}`:''}${p&&p.current&&p.fm===fm?` · 估整月 ${fmtY(p.projected)}`:''} · 共同 ${fmtY(fmC.totalCommon)} / 個人 ${fmtY(fmC.totalPersonal)}</div>
+        <div class="foot">${fmC.count} 筆 · 共同 ${fmtY(fmC.totalCommon)} / 個人 ${fmtY(fmC.totalPersonal)}${p&&p.prevTotal!=null&&p.fm===fm?` · 上月 ${fmtY(p.prevTotal)}`:''}${p&&p.current&&p.fm===fm?` · 估整月 ${fmtY(p.projected)}`:''}</div>
       </div>
       <div class="rows">${detail}</div>
     </div>`;
@@ -386,7 +408,8 @@ function listShell(){
         <div class="seg">${sortBtns}</div>
         <button class="iconbtn" id="dirBtn" title="排序方向" style="width:36px;height:36px">${ic(S.sortDir==='desc'?'arrow_downward':'arrow_upward')}</button>
       </div>
-      <div class="filters">${allChip}${kindChips}<span class="fdiv"></span>${catChips}</div>
+      <div class="filters kindrow">${allChip}${kindChips}</div>
+      <div class="filters catrow">${catChips}</div>
     </div>
     <div id="listBody"></div>`;
 }

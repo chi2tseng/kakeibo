@@ -6,7 +6,8 @@
 const CONFIG = {
   sheetId: '1e_0xtMLKy9EmZS8VU6kVHscXl0YzLMcbH_4Wfd5EzYc',
   currency: '¥',
-  excludeCats: ['初期費用', '語言學校'],
+  excludeCats: ['初期費用', '語言學校'],   // 一次性大筆（不會每月重複）
+  recurringCats: ['房租', '通訊', '電', '水', '瓦斯', '國民健保', '保險', '管理費', '網路', '訂閱'], // 經常性固定支出（每月重複）
   togetherLabel: '一起',
 };
 CONFIG.csvUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/export?format=csv`;
@@ -93,8 +94,8 @@ function compute(tx,people){
   const TOG=CONFIG.togetherLabel;
   let total=0,totalCommon=0,totalPersonal=0;
   const byCat={},byMonth={},byMethod={},catCount={};
-  const commonByPerson={},personalByPerson={},catByPerson={},paidByPerson={},payerCat={};
-  people.forEach(p=>{commonByPerson[p]=0;personalByPerson[p]=0;catByPerson[p]={};paidByPerson[p]=0;payerCat[p]={};});
+  const commonByPerson={},personalByPerson={},catByPerson={},paidByPerson={},payerCat={},commonCatByPerson={};
+  people.forEach(p=>{commonByPerson[p]=0;personalByPerson[p]=0;catByPerson[p]={};paidByPerson[p]=0;payerCat[p]={};commonCatByPerson[p]={};});
   let biggest=null;
 
   const addPayer=(p,cat,amt)=>{ if(paidByPerson[p]==null) return; paidByPerson[p]+=amt; payerCat[p][cat]=(payerCat[p][cat]||0)+amt; };
@@ -116,9 +117,10 @@ function compute(tx,people){
       if(personalByPerson[t.payer]!=null){ personalByPerson[t.payer]+=t.amt; catByPerson[t.payer][t.cat]=(catByPerson[t.payer][t.cat]||0)+t.amt; }
     } else {
       totalCommon+=t.amt;
-      if(t.payer===TOG){ const sh=t.amt/people.length; people.forEach(p=>commonByPerson[p]+=sh); }
-      else if(commonByPerson[t.payer]!=null) commonByPerson[t.payer]+=t.amt;
-      else { const sh=t.amt/people.length; people.forEach(p=>commonByPerson[p]+=sh); }
+      const addCommon=(p,amt)=>{ if(commonByPerson[p]==null) return; commonByPerson[p]+=amt; commonCatByPerson[p][t.cat]=(commonCatByPerson[p][t.cat]||0)+amt; };
+      if(t.payer===TOG){ const sh=t.amt/people.length; people.forEach(p=>addCommon(p,sh)); }
+      else if(commonByPerson[t.payer]!=null) addCommon(t.payer,t.amt);
+      else { const sh=t.amt/people.length; people.forEach(p=>addCommon(p,sh)); }
     }
   }
   const fairShare=people.length?totalCommon/people.length:0;
@@ -126,7 +128,7 @@ function compute(tx,people){
   const settlements=minCashFlow(balance);
 
   return {people,total,totalCommon,totalPersonal,byCat,byMonth,byMethod,catCount,
-    commonByPerson,personalByPerson,catByPerson,paidByPerson,payerCat,
+    commonByPerson,personalByPerson,catByPerson,paidByPerson,payerCat,commonCatByPerson,
     fairShare,balance,settlements,biggest,count:tx.length};
 }
 
