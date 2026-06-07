@@ -6,8 +6,9 @@
 const CONFIG = {
   sheetId: '1e_0xtMLKy9EmZS8VU6kVHscXl0YzLMcbH_4Wfd5EzYc',
   currency: '¥',
-  excludeCats: ['初期費用', '語言學校'],   // 一次性大筆（不會每月重複）
-  recurringCats: ['房租', '通訊', '電', '水', '瓦斯', '國民健保', '保險', '管理費', '網路', '訂閱'], // 經常性固定支出（每月重複）
+  excludeCats: ['初期費用', '語言學校'],   // 「排除大筆」開關用：一次性大筆
+  // 固定費：金額固定/預先決定、無法反映花費行為的支出 → 預估比較時排除，只比變動花費才有意義
+  fixedCats: ['房租', '語言學校', '初期費用', '通訊', '國民健保', '保險', '管理費', '訂閱', '網路', '學費', '分期'],
   togetherLabel: '一起',
 };
 CONFIG.csvUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/export?format=csv`;

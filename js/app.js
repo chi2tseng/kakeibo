@@ -29,7 +29,10 @@ if(window.Chart){
 /* helpers */
 function ic(n,cls){ return `<span class="ms${cls?' '+cls:''}">${n}</span>`; }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function personTag(p,cls){ const av=`<span class="who${cls?' '+cls:''}">${esc(p[0])}</span>`; return p.length>1?`${av}<span>${esc(p)}</span>`:av; }
+function personBadge(p,i,lg){ const bg=PERSON_CHART[i]!=null?PERSON_CHART[i]:'#163300';
+  const dark=['#163300','#054d28','#2f5d22','#4e8c33'].includes(bg);
+  return `<span class="who${lg?' lg':''}" style="background:${bg};color:${dark?'#fff':'#163300'}">${esc(p[0])}</span>`; }
+function personTag(p,i){ const av=personBadge(p,i); return p.length>1?`${av}<span>${esc(p)}</span>`:av; }
 function pct(a,b){ return b?(a/b*100):0; }
 function compact(n){ n=Math.abs(n); if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1)+'M'; if(n>=1e3) return Math.round(n/1e3)+'k'; return ''+Math.round(n); }
 function mLabel(ym){ return ym?(+ym.split('-')[1])+'月':''; }
@@ -111,22 +114,21 @@ function focusMonth(){ return S.period!=='all'?S.period:(S.months[S.months.lengt
 function pace(){
   const fm=focusMonth(); if(!fm) return null;
   const dim=monthDays(fm), days=elapsedDays(fm), current=isCurrentMonth(fm);
-  const REC=CONFIG.recurringCats, ONE=CONFIG.excludeCats;
-  const sumMonth=(ym)=>{ let total=0,rec=0,one=0,vari=0;
+  const FIX=CONFIG.fixedCats;
+  const sumMonth=(ym)=>{ let total=0,fixed=0,vari=0;
     for(const t of S.tx){ if(!t.date||t.date.ym!==ym) continue; total+=t.amt;
-      if(ONE.includes(t.cat)) one+=t.amt; else if(REC.includes(t.cat)) rec+=t.amt; else vari+=t.amt; }
-    return {total,rec,one,vari}; };
+      if(FIX.includes(t.cat)) fixed+=t.amt; else vari+=t.amt; }
+    return {total,fixed,vari}; };
   const cur=sumMonth(fm);
   const idx=S.months.indexOf(fm), prevYm=idx>0?S.months[idx-1]:null;
   const prev=prevYm?sumMonth(prevYm):null;
-  const recProj=prev?Math.max(cur.rec,prev.rec):cur.rec;            // 經常性：估計會跟上月一樣（或本月已發生的較多者）
-  const varProj=current?(cur.vari/days)*dim:cur.vari;              // 變動：按已過天數配速
-  const projected=recProj+varProj+cur.one;                         // ＋一次性照實
-  const prevTotal=prev?prev.total:null;
-  const deltaVsPrev=(prevTotal&&prevTotal>0)?(projected-prevTotal)/prevTotal*100:null;
-  return {fm,current,days,dim,total:cur.total,rec:cur.rec,vari:cur.vari,one:cur.one,
-    recProj,varProj,projected,prevYm,prevTotal,prevRec:prev?prev.rec:null,deltaVsPrev,
-    daily:cur.total/days,prevDaily:prev?prev.total/monthDays(prevYm):null};
+  const varProj=current?(cur.vari/days)*dim:cur.vari;                       // 變動估整月：按已過天數配速
+  const prevVar=prev?prev.vari:null;
+  const varDelta=(prevVar&&prevVar>0)?(varProj-prevVar)/prevVar*100:null;   // 變動 vs 上月 → 真正「多花/少花」
+  const fixedEst=prev?Math.max(cur.fixed,prev.fixed):cur.fixed;            // 固定費估計沿用上月
+  const projTotal=varProj+fixedEst;
+  return {fm,current,days,dim,total:cur.total,fixed:cur.fixed,vari:cur.vari,
+    varProj,prevVar,varDelta,fixedEst,projTotal,prevYm,prevTotal:prev?prev.total:null};
 }
 function deltaBadge(d){
   if(d==null) return '';
@@ -144,16 +146,16 @@ function viewOverview(c,work,cAll){
     ? `<div class="metric" style="cursor:pointer" onclick="go('settle')">
          <div class="label">${ic('swap_horiz')} 目前結算</div>
          <div class="value">${fmtY(st.amount)}</div>
-         <div class="foot" style="display:flex;align-items:center;gap:7px"><span class="who">${esc(st.from[0])}</span>${ic('arrow_forward')}<span class="who alt">${esc(st.to[0])}</span></div>
+         <div class="foot" style="display:flex;align-items:center;gap:7px">${personBadge(st.from,c.people.indexOf(st.from))}${ic('arrow_forward')}${personBadge(st.to,c.people.indexOf(st.to))}</div>
        </div>`
     : `<div class="metric"><div class="label">${ic('swap_horiz')} 目前結算</div><div class="value" style="color:var(--down);display:flex;align-items:center;gap:8px">${ic('check_circle','fill')} 已結清</div></div>`;
 
   const p=pace();
   const paceCard=p?`<div class="metric">
-      <div class="label">${ic('calendar_month')} ${mLabel(p.fm)}${p.current?` · ${p.days}/${p.dim} 天`:''} ${p.current&&p.deltaVsPrev!=null?deltaBadge(p.deltaVsPrev):''}</div>
+      <div class="label">${ic('calendar_month')} ${mLabel(p.fm)}${p.current?` · ${p.days}/${p.dim} 天`:''} ${p.current&&p.varDelta!=null?deltaBadge(p.varDelta):''}</div>
       <div class="value">${fmtY(p.total)}</div>
-      <div class="foot">${[p.current?`估整月 ${fmtY(p.projected)}`:'',p.prevTotal!=null?`上月 ${fmtY(p.prevTotal)}`:''].filter(Boolean).join(' · ')}</div>
-      ${p.current?`<div class="foot" style="font-size:11.5px">經常性 ${fmtY(p.recProj)} ＋ 變動估 ${fmtY(p.varProj)}${p.one>0?` ＋ 一次性 ${fmtY(p.one)}`:''}</div>`:''}
+      <div class="foot">變動 ${fmtY(p.current?p.varProj:p.vari)}${p.current?'（估）':''}${p.prevVar!=null?` · 上月變動 ${fmtY(p.prevVar)}`:''}</div>
+      <div class="foot" style="font-size:11.5px">固定 ${fmtY(p.fixed)}（房租·學費等不計入比較）</div>
     </div>`:'';
 
   const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -244,7 +246,6 @@ function viewSettle(c){
       </div>
       <div class="amt num"><span class="cur">¥</span>${fmt(st.amount)}</div>
       <div class="cap"><b>${esc(st.from)}</b> 要還給 <b>${esc(st.to)}</b></div>
-      <div class="scen">${S.exclude?'含大筆':'排除大筆'}：${ost?`<b>${esc(ost.from)} → ${esc(ost.to)} ${fmtY(ost.amount)}</b>`:'<b>已結清</b>'}</div>
     </div>`;
   }
 
@@ -252,7 +253,7 @@ function viewSettle(c){
   const maxC=Math.max(...active.people.map(p=>active.commonByPerson[p]||0),1);
   const bars=active.people.map((p,i)=>{
     const v=active.commonByPerson[p]||0,diff=v-active.fairShare;
-    return `<div class="ctrack"><div class="top"><b>${personTag(p)}</b><span class="num">${fmtY(v)}</span></div>
+    return `<div class="ctrack"><div class="top"><b>${personTag(p,i)}</b><span class="num">${fmtY(v)}</span></div>
       <div class="line"><i style="width:${pct(v,maxC)}%;background:${PERSON_CHART[i]}"></i></div>
       <div class="foot" style="margin-top:6px;font-size:12px;color:var(--mute)">${diff>=0?'多墊':'少墊'} ${fmtY(Math.abs(diff))}</div></div>`;
   }).join('');
@@ -265,7 +266,7 @@ function viewSettle(c){
       <div class="main"><div class="l1"><span class="name">${esc(n)}</span><span class="amt">${fmtY(a)}</span></div>
       <div class="bar thin"><i style="width:${pct(a,mx).toFixed(1)}%;background:${PERSON_CHART[i]}"></i></div></div></div>`).join('')||emptyRow();
     return `<div class="card">
-      <div class="card-head"><h3>${personTag(p)} 花在哪</h3><span class="num" style="font-weight:700">${fmtY(active.paidByPerson[p]||0)}</span></div>
+      <div class="card-head"><h3>${personTag(p,i)} 花在哪</h3><span class="num" style="font-weight:700">${fmtY(active.paidByPerson[p]||0)}</span></div>
       <div class="rows">${rows}</div></div>`;
   }).join('');
 
@@ -322,7 +323,7 @@ function viewSplit(c){
     const personal=Object.entries(c.catByPerson[p]||{}).sort((a,b)=>b[1]-a[1]);
     const cTot=c.commonByPerson[p]||0, pTot=c.personalByPerson[p]||0;
     return `<div class="card">
-      <div class="card-head"><h3>${personTag(p)}</h3><span class="num" style="font-weight:700">${fmtY(cTot+pTot)}</span></div>
+      <div class="card-head"><h3>${personTag(p,i)}</h3><span class="num" style="font-weight:700">${fmtY(cTot+pTot)}</span></div>
       <div class="subhead"><span>${ic('group')} 共同墊付</span><b>${fmtY(cTot)}</b></div>
       <div class="rows">${mkRows(common,col)}</div>
       <div class="subhead" style="margin-top:14px"><span>${ic('person')} 個人</span><b>${fmtY(pTot)}</b></div>
@@ -330,7 +331,7 @@ function viewSplit(c){
     </div>`;
   }).join('');
   const maxC=Math.max(...people.map(p=>c.commonByPerson[p]||0),1);
-  const commonBars=people.map((p,i)=>`<div class="ctrack"><div class="top"><b>${personTag(p)}</b><span class="num">${fmtY(c.commonByPerson[p]||0)}</span></div><div class="line"><i style="width:${pct(c.commonByPerson[p]||0,maxC)}%;background:${PERSON_CHART[i]}"></i></div></div>`).join('');
+  const commonBars=people.map((p,i)=>`<div class="ctrack"><div class="top"><b>${personTag(p,i)}</b><span class="num">${fmtY(c.commonByPerson[p]||0)}</span></div><div class="line"><i style="width:${pct(c.commonByPerson[p]||0,maxC)}%;background:${PERSON_CHART[i]}"></i></div></div>`).join('');
   const html=`
     <div class="page-head"><h2>共同 / 個人</h2><div class="sub">${periodName()}${S.exclude?' · 排除大筆':''}</div></div>
     <div class="grid g-2">
@@ -366,11 +367,11 @@ function viewMonthly(c,work,cAll){
     <div class="page-head"><h2>月份趨勢</h2><div class="sub">每月總支出${S.exclude?' · 排除大筆':''}</div></div>
     <div class="card"><div class="chart-scroll"><div class="chart bars" style="min-width:${Math.max(0,months.length*52)}px"><canvas id="monthBars"></canvas></div></div></div>
     <div class="card">
-      <div class="card-head"><h3>${ic('calendar_month')} ${mLabelFull(fm)} ${p&&p.current&&p.deltaVsPrev!=null?deltaBadge(p.deltaVsPrev):''}</h3></div>
+      <div class="card-head"><h3>${ic('calendar_month')} ${mLabelFull(fm)} ${p&&p.current&&p.varDelta!=null?deltaBadge(p.varDelta):''}</h3></div>
       <div class="month-pick">${chips}</div>
       <div class="metric" style="margin-bottom:6px">
         <div class="value">${fmtY(fmC.total)}</div>
-        <div class="foot">${fmC.count} 筆 · 共同 ${fmtY(fmC.totalCommon)} / 個人 ${fmtY(fmC.totalPersonal)}${p&&p.prevTotal!=null&&p.fm===fm?` · 上月 ${fmtY(p.prevTotal)}`:''}${p&&p.current&&p.fm===fm?` · 估整月 ${fmtY(p.projected)}`:''}</div>
+        <div class="foot">${fmC.count} 筆 · 共同 ${fmtY(fmC.totalCommon)} / 個人 ${fmtY(fmC.totalPersonal)}${p&&p.prevTotal!=null&&p.fm===fm?` · 上月 ${fmtY(p.prevTotal)}`:''}${p&&p.current&&p.fm===fm?` · 估整月 ${fmtY(p.projTotal)}`:''}</div>
       </div>
       <div class="rows">${detail}</div>
     </div>`;
