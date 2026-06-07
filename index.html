@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="description" content="騏 & 乖 共同記帳 — 即時同步 Google Sheet" />
+  <title>記帳 · 騏 & 乖</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%239fe870'/><text x='50' y='73' font-size='60' text-anchor='middle' font-family='sans-serif' font-weight='700' fill='%23163300'>¥</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300,0,0&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="progress" class="progress" aria-hidden="true"></div>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="bar-main">
+        <button class="brand" id="homeBtn" title="回到總覽">
+          <span class="logo">¥</span>
+          <span class="brand-tx">記帳</span>
+        </button>
+
+        <nav class="tabs desktop" id="topTabs"></nav>
+
+        <div class="bar-actions">
+          <button class="toggle-pill" id="excludeChip" title="排除初期費用與語言學校等大筆一次性支出">
+            <span class="ms">filter_alt</span>
+            <span class="tp-label">排除大筆</span>
+            <span class="sw"><span class="knob"></span></span>
+          </button>
+          <button class="iconbtn" id="refreshBtn" title="重新整理"><span class="ms">refresh</span></button>
+        </div>
+      </div>
+
+      <div class="bar-period">
+        <div class="period-scroll" id="periodChips"></div>
+      </div>
+    </header>
+
+    <main>
+      <div id="view"></div>
+      <p class="sync" id="syncInfo"></p>
+    </main>
+
+    <nav class="bottomnav" id="bottomNav"></nav>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="js/lib.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

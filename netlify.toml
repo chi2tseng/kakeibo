@@ -1,0 +1,11 @@
+# 純靜態網站，無建置步驟
+[build]
+  publish = "."
+  command = ""
+
+# 安全標頭
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
