@@ -14,7 +14,7 @@ const TABS = [
 
 const S = {
   tx:[], people:[], months:[],
-  tab:'overview', period:'all', exclude:false,
+  tab:'overview', period:'all', exclude:true,   // 預設排除初期費用＋語言學校等大筆一次性支出
   search:'', fKinds:[], fCats:[], sortBy:'date', sortDir:'desc',
   lastSync:null, loading:true, error:null, charts:[],
 };
