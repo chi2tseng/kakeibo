@@ -15,7 +15,7 @@ const TABS = [
 const S = {
   tx:[], people:[], months:[],
   tab:'overview', period:'all', exclude:false,
-  search:'', kindFilter:'all', catFilter:'all', sortBy:'date', sortDir:'desc',
+  search:'', fKinds:[], fCats:[], sortBy:'date', sortDir:'desc',
   lastSync:null, loading:true, error:null, charts:[],
 };
 
@@ -344,10 +344,8 @@ function viewMonthly(c,work,cAll){
     <div class="page-head"><h2>月份趨勢</h2><div class="sub">每月總支出${S.exclude?' · 排除大筆':''}</div></div>
     <div class="card"><div class="chart bars"><canvas id="monthBars"></canvas></div></div>
     <div class="card">
-      <div class="card-head" style="flex-wrap:wrap;gap:10px">
-        <h3>${ic('calendar_month')} ${mLabelFull(fm)} ${p&&p.current?deltaBadge(p.deltaP):''}</h3>
-        <div class="filters" style="margin:0">${chips}</div>
-      </div>
+      <div class="card-head"><h3>${ic('calendar_month')} ${mLabelFull(fm)} ${p&&p.current?deltaBadge(p.deltaP):''}</h3></div>
+      <div class="month-pick">${chips}</div>
       <div class="metric" style="margin-bottom:6px">
         <div class="value">${fmtY(fmC.total)}</div>
         <div class="foot">${fmC.count} 筆 · 日均 ${fmtY((p&&p.fm===fm)?p.daily:fmC.total/Math.max(1,daySpan(fmWork)))}${p&&p.prevDaily!=null&&p.fm===fm?` · 上月日均 ${fmtY(p.prevDaily)}`:''}${p&&p.current&&p.fm===fm?` · 估整月 ${fmtY(p.projected)}`:''} · 共同 ${fmtY(fmC.totalCommon)} / 個人 ${fmtY(fmC.totalPersonal)}</div>
@@ -372,30 +370,30 @@ function viewList(c,work){
 }
 function listShell(){
   const cc=compute(applyFilters(S.tx,{period:S.period,exclude:S.exclude}));
-  const cats=['all',...Object.keys(cc.byCat).sort((a,b)=>(cc.catCount[b]||0)-(cc.catCount[a]||0))];
-  const catChips=cats.map(k=>`<button class="fchip ${S.catFilter===k?'active':''}" data-cat="${esc(k)}">${k==='all'?ic('apps'):ic(catIcon(k))}${k==='all'?'全部':esc(k)}</button>`).join('');
+  const cats=Object.keys(cc.byCat).sort((a,b)=>(cc.catCount[b]||0)-(cc.catCount[a]||0));
+  const noFilter=!S.fKinds.length && !S.fCats.length;
+  const allChip=`<button class="fchip ${noFilter?'active':''}" data-all="1">${ic('apps')}全部</button>`;
+  const kindChips=[['共同','group'],['個人','person']].map(([k,i])=>`<button class="fchip kind ${S.fKinds.includes(k)?'active':''}" data-kind="${k}">${ic(i)}${k}</button>`).join('');
+  const catChips=cats.map(k=>`<button class="fchip ${S.fCats.includes(k)?'active':''}" data-cat="${esc(k)}">${ic(catIcon(k))}${esc(k)}</button>`).join('');
   const sorts=[['date','日期','event'],['amount','金額','payments'],['cat','類型','category']];
   const sortBtns=sorts.map(([k,l,i])=>`<button class="${S.sortBy===k?'active':''}" data-sort="${k}">${ic(i)}${l}</button>`).join('');
-  const kinds=[['all','全部'],['共同','共同'],['個人','個人']];
-  const kindBtns=kinds.map(([k,l])=>`<button class="${S.kindFilter===k?'active':''}" data-kind="${k}">${l}</button>`).join('');
   return `
     <div class="page-head"><h2>明細</h2></div>
     <div class="toolbar">
       <div class="search">${ic('search')}<input id="searchInput" placeholder="搜尋品項、店名、付款人" value="${esc(S.search)}"/></div>
       <div class="sortbar">
+        <span class="lbl">排序</span>
         <div class="seg">${sortBtns}</div>
         <button class="iconbtn" id="dirBtn" title="排序方向" style="width:36px;height:36px">${ic(S.sortDir==='desc'?'arrow_downward':'arrow_upward')}</button>
-        <span style="flex:1"></span>
-        <div class="seg">${kindBtns}</div>
       </div>
-      <div class="filters">${catChips}</div>
+      <div class="filters">${allChip}${kindChips}<span class="fdiv"></span>${catChips}</div>
     </div>
     <div id="listBody"></div>`;
 }
 function listRows(){
   let rows=applyFilters(S.tx,{period:S.period,exclude:S.exclude}).slice();
-  if(S.kindFilter!=='all') rows=rows.filter(t=>t.kind===S.kindFilter);
-  if(S.catFilter!=='all') rows=rows.filter(t=>t.cat===S.catFilter);
+  if(S.fKinds.length) rows=rows.filter(t=>S.fKinds.includes(t.kind));
+  if(S.fCats.length) rows=rows.filter(t=>S.fCats.includes(t.cat));
   if(S.search.trim()){ const q=S.search.trim().toLowerCase(); rows=rows.filter(t=>(t.desc+t.cat+t.payer+t.method).toLowerCase().includes(q)); }
   const dir=S.sortDir==='desc'?-1:1;
   rows.sort((a,b)=>{
@@ -419,16 +417,23 @@ function listRows(){
 function mountList(){
   renderListBody();
   const inp=document.getElementById('searchInput');
-  if(inp) inp.oninput=()=>{S.search=inp.value;const p=inp.selectionStart;renderListBody();const n=document.getElementById('searchInput');if(n){n.focus();try{n.setSelectionRange(p,p)}catch(e){}}};
+  if(inp) inp.oninput=()=>{S.search=inp.value;renderListBody();};
   document.querySelectorAll('[data-sort]').forEach(b=>b.onclick=()=>{S.sortBy=b.dataset.sort;refreshListControls();});
-  document.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{S.kindFilter=b.dataset.kind;refreshListControls();});
-  document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{S.catFilter=b.dataset.cat;refreshListControls();});
+  const allB=document.querySelector('[data-all]'); if(allB) allB.onclick=()=>{S.fKinds=[];S.fCats=[];refreshListControls();};
+  document.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{toggleIn(S.fKinds,b.dataset.kind);refreshListControls();});
+  document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{toggleIn(S.fCats,b.dataset.cat);refreshListControls();});
   const dir=document.getElementById('dirBtn'); if(dir) dir.onclick=()=>{S.sortDir=S.sortDir==='desc'?'asc':'desc';refreshListControls();};
 }
+function toggleIn(arr,v){ const i=arr.indexOf(v); if(i>=0) arr.splice(i,1); else arr.push(v); }
 function refreshListControls(){
-  // re-render the whole list view (controls + body) but keep scroll
-  document.getElementById('view').innerHTML=`<div class="view" style="animation:none">${listShell()}</div>`;
-  mountList();
+  // update control active-states in place (keeps filter scroll + search focus), re-render body only
+  document.querySelectorAll('[data-sort]').forEach(b=>b.classList.toggle('active',b.dataset.sort===S.sortBy));
+  const dir=document.getElementById('dirBtn'); if(dir) dir.innerHTML=ic(S.sortDir==='desc'?'arrow_downward':'arrow_upward');
+  const noFilter=!S.fKinds.length&&!S.fCats.length;
+  const allB=document.querySelector('[data-all]'); if(allB) allB.classList.toggle('active',noFilter);
+  document.querySelectorAll('[data-kind]').forEach(b=>b.classList.toggle('active',S.fKinds.includes(b.dataset.kind)));
+  document.querySelectorAll('[data-cat]').forEach(b=>b.classList.toggle('active',S.fCats.includes(b.dataset.cat)));
+  renderListBody();
 }
 function renderListBody(){ const el=document.getElementById('listBody'); if(el) el.innerHTML=listRows(); }
 

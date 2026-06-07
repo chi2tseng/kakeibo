@@ -219,6 +219,11 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 .fchip .ms{font-size:16px}
 .fchip:hover{border-color:var(--mute)}
 .fchip.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+.fchip.kind.active{background:var(--forest);border-color:var(--forest)}
+.fdiv{flex:0 0 auto;align-self:center;width:1px;height:20px;background:var(--line);margin:0 2px}
+/* horizontal month selector (monthly page) */
+.month-pick{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:4px;margin:2px 0 12px}
+.month-pick::-webkit-scrollbar{display:none}
 .sortbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .sortbar .lbl{font-size:12px;color:var(--mute);font-weight:600}
 .seg{display:inline-flex;background:var(--soft);border-radius:var(--r-pill);padding:3px}
@@ -261,8 +266,9 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
   .tabs.desktop{display:none}
   .bar-main{display:flex;justify-content:space-between;height:52px;gap:8px}
   :root{--barH:52px}
-  .toggle-pill .tp-label{display:none}
   .toggle-pill{padding:0 10px;gap:6px}
+  .toggle-pill .tp-label{font-size:12.5px}
+  .toggle-pill .ms{font-size:17px}
   main{padding:14px 14px 90px}
   .filters{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
   .card{padding:16px;border-radius:var(--r-lg)}
