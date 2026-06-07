@@ -29,9 +29,11 @@ if(window.Chart){
 /* helpers */
 function ic(n,cls){ return `<span class="ms${cls?' '+cls:''}">${n}</span>`; }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function personBadge(p,i,lg){ const bg=PERSON_CHART[i]!=null?PERSON_CHART[i]:'#163300';
-  const dark=['#163300','#054d28','#2f5d22','#4e8c33'].includes(bg);
-  return `<span class="who${lg?' lg':''}" style="background:${bg};color:${dark?'#fff':'#163300'}">${esc(p[0])}</span>`; }
+function personBadge(p,i,lg){
+  let style;
+  if(i===1) style='background:#fff;color:#163300;border:1.5px solid #163300';   // 乖：白底深綠邊
+  else { const bg=PERSON_CHART[i]!=null?PERSON_CHART[i]:'#163300'; const dark=['#163300','#054d28','#2f5d22','#4e8c33'].includes(bg); style=`background:${bg};color:${dark?'#fff':'#163300'}`; }
+  return `<span class="who${lg?' lg':''}" style="${style}">${esc(p[0])}</span>`; }
 function personTag(p,i){ const av=personBadge(p,i); return p.length>1?`${av}<span>${esc(p)}</span>`:av; }
 function pct(a,b){ return b?(a/b*100):0; }
 function compact(n){ n=Math.abs(n); if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1)+'M'; if(n>=1e3) return Math.round(n/1e3)+'k'; return ''+Math.round(n); }
