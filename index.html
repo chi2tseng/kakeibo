@@ -18,9 +18,8 @@
   <div class="app">
     <header class="topbar">
       <div class="bar-main">
-        <button class="brand" id="homeBtn" title="回到總覽">
+        <button class="brand" id="homeBtn" title="回到總覽" aria-label="回到總覽">
           <span class="logo">¥</span>
-          <span class="brand-tx">記帳</span>
         </button>
 
         <nav class="tabs desktop" id="topTabs"></nav>
@@ -31,7 +30,12 @@
             <span class="tp-label">排除大筆</span>
             <span class="sw"><span class="knob"></span></span>
           </button>
-          <button class="iconbtn" id="refreshBtn" title="重新整理"><span class="ms">refresh</span></button>
+          <button class="iconbtn refresh-btn" id="refreshBtn" title="重新整理" aria-label="重新整理">
+            <svg class="refresh-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path class="r-arc" d="M21 12a9 9 0 1 1-2.64-6.36"/>
+              <path class="r-head" d="M21 3.5V9h-5.5"/>
+            </svg>
+          </button>
         </div>
       </div>
 

@@ -36,7 +36,7 @@ function mLabel(ym){ return ym?(+ym.split('-')[1])+'月':''; }
 function mLabelFull(ym){ if(!ym) return ''; const [y,m]=ym.split('-'); return `${y} 年 ${+m} 月`; }
 function destroyCharts(){ S.charts.forEach(c=>{try{c.destroy()}catch(e){}}); S.charts=[]; }
 function moneyTooltip(totalRef){ return {callbacks:{label(ctx){const v=ctx.parsed.y!=null?ctx.parsed.y:ctx.parsed;const tot=typeof totalRef==='function'?totalRef():totalRef;const p=tot?` · ${(v/tot*100).toFixed(1)}%`:'';const nm=ctx.label?ctx.label+': ':'';return `${nm}${fmtY(v)}${p}`;}}}; }
-function setProgress(on){ const p=document.getElementById('progress'); if(p) p.classList.toggle('on',on); }
+function setProgress(on){ const p=document.getElementById('progress'); if(p) p.classList.toggle('on',on); const rb=document.getElementById('refreshBtn'); if(rb) rb.classList.toggle('loading',on); }
 
 /* boot */
 async function boot(){
@@ -54,7 +54,7 @@ async function loadData(initial){
   }catch(e){ S.error=e.message||String(e); console.error(e); }
   finally{
     S.loading=false; buildPeriod(); buildNav(); renderView(); renderSync();
-    setTimeout(()=>setProgress(false),300);
+    setTimeout(()=>setProgress(false),550); // keep the refresh motion visible briefly
   }
 }
 function renderSync(){
@@ -139,7 +139,7 @@ function viewOverview(c,work,cAll){
   const paceCard=p?`<div class="metric">
       <div class="label">${ic('calendar_month')} ${mLabel(p.fm)}${p.current?` · ${p.days}天`:''} ${deltaBadge(p.deltaP)}</div>
       <div class="value">${fmtY(p.total)}</div>
-      <div class="foot">日均 ${fmtY(p.daily)}${p.current?` · 估整月 ${fmtY(p.projected)}`:''}</div>
+      <div class="foot">日均 ${fmtY(p.daily)}${p.prevDaily!=null?` · 上月日均 ${fmtY(p.prevDaily)}`:''}${p.current?` · 估整月 ${fmtY(p.projected)}`:''}</div>
     </div>`:'';
 
   const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -172,7 +172,7 @@ function viewOverview(c,work,cAll){
       </div>
       <div class="card">
         <div class="card-head"><h3>${ic('lightbulb')} 洞察</h3></div>
-        ${insights(c)}
+        ${insights(c,work)}
       </div>
     </div>
     <div class="card">
@@ -181,14 +181,33 @@ function viewOverview(c,work,cAll){
     </div>`;
   return [html,()=>{}];
 }
-function insights(c){
+function insights(c,work){
   const out=[];
+  const dated=(work||[]).filter(t=>t.date).slice().sort((a,b)=>b.date.sort-a.date.sort);
+  const last=dated[0];
+  // 近期：最近一筆
+  if(last) out.push([catIcon(last.cat),`最近一筆 <b>${esc(last.desc||last.cat)}</b> · ${fmtY(last.amt)} · ${last.date.iso.slice(5)}`]);
+  // 近期：近 7 天（相對最新日期）
+  if(last){
+    const d=new Date(last.date.y,last.date.m-1,last.date.d); d.setDate(d.getDate()-6);
+    const lo=d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();
+    const r7=dated.filter(t=>t.date.sort>=lo), sum=r7.reduce((a,b)=>a+b.amt,0);
+    out.push(['date_range',`近 7 天 <b>${fmtY(sum)}</b> · ${r7.length} 筆`]);
+  }
+  // 習慣：最常買（筆數）
+  const cnt={}; (work||[]).forEach(t=>cnt[t.cat]=(cnt[t.cat]||0)+1);
+  const tf=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+  if(tf) out.push(['repeat',`最常買 <b>${esc(tf[0])}</b> · ${tf[1]} 筆`]);
+  // 最大開銷類別
   const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]);
   if(cats.length){ const [n,a]=cats[0]; out.push([catIcon(n),`最大開銷 <b>${esc(n)}</b> · ${fmtY(a)} · ${pct(a,c.total).toFixed(0)}%`]); }
+  // 最大單筆
   if(c.biggest) out.push(['local_fire_department',`最大單筆 <b>${esc(c.biggest.desc||c.biggest.cat)}</b> · ${fmtY(c.biggest.amt)}`]);
-  const cash=c.byMethod['現金']||0; if(c.total) out.push(['payments',`現金 <b>${pct(cash,c.total).toFixed(0)}%</b> · 刷卡 <b>${(100-pct(cash,c.total)).toFixed(0)}%</b>`]);
+  // 現金 vs 刷卡
+  const cash=c.byMethod['現金']||0; if(c.total) out.push(['account_balance_wallet',`現金 <b>${pct(cash,c.total).toFixed(0)}%</b> · 刷卡 <b>${(100-pct(cash,c.total)).toFixed(0)}%</b>`]);
+  // 共同墊付差
   if(c.people.length===2){ const [a,b]=c.people; const d=(c.commonByPerson[a]||0)-(c.commonByPerson[b]||0); if(Math.abs(d)>1){ const more=d>0?a:b,less=d>0?b:a; out.push(['balance',`<b>${esc(more)}</b> 比 <b>${esc(less)}</b> 多墊 <b>${fmtY(Math.abs(d))}</b>`]); } }
-  return out.slice(0,4).map(([i,t])=>`<div class="insight"><div class="ico sm">${ic(i)}</div><div class="tx2">${t}</div></div>`).join('');
+  return out.slice(0,6).map(([i,t])=>`<div class="insight"><div class="ico sm">${ic(i)}</div><div class="tx2">${t}</div></div>`).join('');
 }
 
 /* =========================================================================
@@ -205,9 +224,9 @@ function viewSettle(c){
   else{
     hero=`<div class="settle">
       <div class="flow">
-        <div class="p"><div class="who lg">${esc(st.from[0])}</div><span>${esc(st.from)}</span></div>
+        <div class="who lg">${esc(st.from[0])}</div>
         <div class="ar">${ic('arrow_forward')}</div>
-        <div class="p"><div class="who lg alt">${esc(st.to[0])}</div><span>${esc(st.to)}</span></div>
+        <div class="who lg alt">${esc(st.to[0])}</div>
       </div>
       <div class="amt num"><span class="cur">¥</span>${fmt(st.amount)}</div>
       <div class="cap"><b>${esc(st.from)}</b> 要還給 <b>${esc(st.to)}</b></div>
@@ -331,7 +350,7 @@ function viewMonthly(c,work,cAll){
       </div>
       <div class="metric" style="margin-bottom:6px">
         <div class="value">${fmtY(fmC.total)}</div>
-        <div class="foot">${fmC.count} 筆 · 日均 ${fmtY((p&&p.fm===fm)?p.daily:fmC.total/Math.max(1,daySpan(fmWork)))}${p&&p.current&&p.fm===fm?` · 估整月 ${fmtY(p.projected)}`:''} · 共同 ${fmtY(fmC.totalCommon)} / 個人 ${fmtY(fmC.totalPersonal)}</div>
+        <div class="foot">${fmC.count} 筆 · 日均 ${fmtY((p&&p.fm===fm)?p.daily:fmC.total/Math.max(1,daySpan(fmWork)))}${p&&p.prevDaily!=null&&p.fm===fm?` · 上月日均 ${fmtY(p.prevDaily)}`:''}${p&&p.current&&p.fm===fm?` · 估整月 ${fmtY(p.projected)}`:''} · 共同 ${fmtY(fmC.totalCommon)} / 個人 ${fmtY(fmC.totalPersonal)}</div>
       </div>
       <div class="rows">${detail}</div>
     </div>`;
@@ -352,7 +371,8 @@ function viewList(c,work){
   return [listShell(), mountList];
 }
 function listShell(){
-  const cats=['all',...Object.keys(compute(applyFilters(S.tx,{period:S.period,exclude:S.exclude})).byCat).sort()];
+  const cc=compute(applyFilters(S.tx,{period:S.period,exclude:S.exclude}));
+  const cats=['all',...Object.keys(cc.byCat).sort((a,b)=>(cc.catCount[b]||0)-(cc.catCount[a]||0))];
   const catChips=cats.map(k=>`<button class="fchip ${S.catFilter===k?'active':''}" data-cat="${esc(k)}">${k==='all'?ic('apps'):ic(catIcon(k))}${k==='all'?'全部':esc(k)}</button>`).join('');
   const sorts=[['date','日期','event'],['amount','金額','payments'],['cat','類型','category']];
   const sortBtns=sorts.map(([k,l,i])=>`<button class="${S.sortBy===k?'active':''}" data-sort="${k}">${ic(i)}${l}</button>`).join('');
@@ -389,7 +409,8 @@ function listRows(){
   let body;
   if(S.sortBy==='date'){
     const g={}; for(const t of rows){ const k=t.date?t.date.iso:'—'; (g[k]=g[k]||[]).push(t); }
-    body=Object.entries(g).map(([day,ts])=>`<div class="daygroup"><div class="dayhead"><span class="d">${day}</span><span class="t num">${fmtY(ts.reduce((a,b)=>a+b.amt,0))}</span></div>${ts.map(txRow).join('')}</div>`).join('');
+    const groups=Object.entries(g).map(([day,ts])=>`<div class="daygroup"><div class="dayhead"><span class="d">${day}</span><span class="t num">${fmtY(ts.reduce((a,b)=>a+b.amt,0))}</span></div>${ts.map(txRow).join('')}</div>`).join('');
+    body=`<div class="card pad-sm">${groups||emptyRow()}</div>`;
   } else {
     body=`<div class="card pad-sm">${rows.map(t=>txRow(t,true)).join('')||emptyRow()}</div>`;
   }

@@ -16,8 +16,9 @@ CONFIG.sheetUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/edit
 const CAT_ICON = {
   '食物':'restaurant', '房租':'home', '日常':'shopping_basket', '語言學校':'school',
   '初期費用':'inventory_2', '通訊':'smartphone', '娛樂':'sports_esports', '交通':'tram',
-  '居住':'chair', '電':'bolt', '水':'water_drop', '國民健保':'health_and_safety',
-  '醫療':'medication', '購物':'shopping_bag', '旅遊':'flight', '禮物':'redeem',
+  '居住':'chair', '電':'bolt', '水':'water_drop', '瓦斯':'gas_meter', '國民健保':'health_and_safety',
+  '醫療':'medication', '保險':'shield', '購物':'shopping_bag', '旅遊':'flight', '禮物':'redeem',
+  '美容':'content_cut', '衣服':'apparel', '寵物':'pets', '教育':'school',
 };
 function catIcon(name){ return CAT_ICON[name] || 'sell'; }
 
