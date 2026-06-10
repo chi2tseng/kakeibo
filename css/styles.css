@@ -180,6 +180,7 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 .chart{position:relative;width:100%}
 .chart.donut{height:240px}
 .chart.bars{height:300px}
+.chart.line{height:210px}
 .chart-scroll{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 .chart-scroll::-webkit-scrollbar{height:6px}
 .chart-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
@@ -265,6 +266,47 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 .empty{text-align:center;color:var(--mute);padding:22px 0;font-size:13.5px}
 .skel{background:linear-gradient(90deg,var(--soft) 25%,#eef0ea 37%,var(--soft) 63%);background-size:400% 100%;animation:sh 1.4s infinite;border-radius:var(--r-md)}
 @keyframes sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
+
+/* =========================================================================
+   v3 — heatmap / spark / legend-mini / motion
+   ========================================================================= */
+.legend-mini{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--mute);font-weight:600}
+.legend-mini i{width:8px;height:8px;border-radius:3px;display:inline-block;margin-left:8px}
+.legend-mini i:first-child{margin-left:0}
+
+.hero .legs{align-items:flex-end}
+.spark-wrap{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.spark-wrap span{font-size:10.5px;color:rgba(255,255,255,.45);font-weight:500;line-height:1}
+
+/* 月曆熱力圖 */
+.hm{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:12px 0 18px}
+.hm-h{font-size:10.5px;color:var(--mute);text-align:center;font-weight:600;padding:2px 0}
+.hm-c{aspect-ratio:1;border-radius:9px;background:var(--soft);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-height:0;cursor:default}
+.hm-c.empty{background:transparent}
+.hm-c .d{font-size:10.5px;font-weight:600;color:var(--mute);line-height:1}
+.hm-c .v{font-size:9px;font-weight:600;line-height:1;opacity:.85;color:var(--body)}
+.hm-c.l1{background:#e2f6d5}.hm-c.l1 .d{color:var(--forest-2)}
+.hm-c.l2{background:#bfe4a1}.hm-c.l2 .d{color:var(--forest)}
+.hm-c.l3{background:#74b84b}.hm-c.l3 .d,.hm-c.l3 .v{color:#fff}
+.hm-c.l4{background:var(--forest)}.hm-c.l4 .d,.hm-c.l4 .v{color:#fff}
+
+/* 進場 stagger（只在切頁/換條件時播放，背景更新不重播） */
+.view{animation:none}
+.view.anim>*{animation:rise .42s cubic-bezier(.2,.8,.25,1) both}
+.view.anim>*:nth-child(2){animation-delay:.05s}
+.view.anim>*:nth-child(3){animation-delay:.1s}
+.view.anim>*:nth-child(4){animation-delay:.15s}
+.view.anim>*:nth-child(5){animation-delay:.2s}
+.view.anim>*:nth-child(6){animation-delay:.25s}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@media(hover:hover) and (pointer:fine){
+  .card{transition:transform .18s ease,box-shadow .18s ease}
+  .card:hover{transform:translateY(-2px);box-shadow:var(--sh-2)}
+}
+@media(prefers-reduced-motion:reduce){
+  .view.anim>*{animation:none}
+  .card,.card:hover{transition:none;transform:none}
+}
 
 /* =========================================================================
    Mobile
