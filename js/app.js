@@ -566,7 +566,22 @@ function listRows(){
   } else {
     body=`<div class="card pad-sm">${rows.map(t=>txRow(t,true)).join('')||emptyRow()}</div>`;
   }
-  return `<div class="sub" style="color:var(--mute);font-size:13px;margin:4px 2px 8px">${rows.length} 筆 · ${fmtY(sum)}</div>${body||`<div class="card"><div class="empty">找不到符合的交易</div></div>`}`;
+  return `<div class="sub" style="color:var(--mute);font-size:13px;margin:4px 2px 8px">${rows.length} 筆 · ${fmtY(sum)}</div>${paymentSummary(rows)}${body||`<div class="card"><div class="empty">找不到符合的交易</div></div>`}`;
+}
+const PAY_META={'現金':{ic:'payments',c:'#9fe870'},'信用卡':{ic:'credit_card',c:'#163300'},'SUICA':{ic:'contactless',c:'#74b84b'},'銀行轉帳':{ic:'account_balance',c:'#8a9282'},'轉帳':{ic:'account_balance',c:'#8a9282'},'電子支付':{ic:'qr_code_2',c:'#bfe4a1'}};
+function payMeta(m){ return PAY_META[m]||{ic:'more_horiz',c:'#c2c6bc'}; }
+function paymentSummary(rows){
+  const by={}; let total=0;
+  for(const t of rows){ const m=t.method||'其他'; by[m]=(by[m]||0)+t.amt; total+=t.amt; }
+  if(!total) return '';
+  const order=Object.entries(by).sort((a,b)=>b[1]-a[1]);
+  const segs=order.map(([m,v])=>{ const md=payMeta(m); return `<i style="width:${pct(v,total)}%;background:${md.c}" title="${esc(m)} ${fmtY(v)}"></i>`; }).join('');
+  const list=order.map(([m,v])=>{ const md=payMeta(m); return `<div class="pay-row"><span class="pay-ic" style="color:${md.c}">${ic(md.ic,'fill')}</span><span class="pay-nm">${esc(m)}</span><span class="pay-vl num">${fmtY(v)}</span><span class="pay-pc">${pct(v,total).toFixed(0)}%</span></div>`; }).join('');
+  return `<div class="card pad-sm pay-card">
+    <div class="card-head" style="margin-bottom:10px"><h3>${ic('account_balance_wallet')} 付款方式</h3><span class="num" style="font-weight:700">${fmtY(total)}</span></div>
+    <div class="pay-bar">${segs}</div>
+    <div class="pay-list">${list}</div>
+  </div>`;
 }
 function mountList(){
   renderListBody();

@@ -267,6 +267,20 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 .skel{background:linear-gradient(90deg,var(--soft) 25%,#eef0ea 37%,var(--soft) 63%);background-size:400% 100%;animation:sh 1.4s infinite;border-radius:var(--r-md)}
 @keyframes sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
 
+/* 明細：付款方式統計 */
+.pay-card{margin-bottom:12px}
+.pay-bar{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--soft);margin-bottom:10px}
+.pay-bar>i{display:block;height:100%;box-shadow:inset -1.5px 0 0 #fff;transition:width .5s cubic-bezier(.2,.8,.2,1)}
+.pay-bar>i:last-child{box-shadow:none}
+.pay-list{display:flex;flex-direction:column}
+.pay-row{display:flex;align-items:center;gap:10px;padding:7px 2px;border-top:1px solid var(--line)}
+.pay-row:first-child{border-top:none}
+.pay-ic{display:flex;align-items:center}
+.pay-ic .ms{font-size:19px}
+.pay-nm{flex:1;font-size:14px;font-weight:600}
+.pay-vl{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.pay-pc{font-size:12px;color:var(--mute);width:38px;text-align:right;font-variant-numeric:tabular-nums}
+
 /* =========================================================================
    v3 — heatmap / spark / legend-mini / motion
    ========================================================================= */
