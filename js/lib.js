@@ -147,3 +147,83 @@ function minCashFlow(balance){
   return out;
 }
 function daySpan(tx){ const d=new Set(); for(const t of tx) if(t.date) d.add(t.date.iso); return d.size||1; }
+
+/* =========================================================================
+   保鮮估算 — 從交易品項說明抓生鮮、依「典型保存天數」估到期日
+   ⚠ 只是粗估（買日 + 一般冷藏壽命），不是真的有效期限
+   ========================================================================= */
+/* 規則「由先到後」第一個命中的關鍵字決定分類；故順序避開撞字（先乳製品再肉類，
+   才不會「牛乳」被當成「牛肉」） */
+const SHELF_RULES = [
+  // 特例覆蓋（要先攔）
+  { group:'加工肉', days:7, icon:'lunch_dining', kw:['サラダチキン'] },
+  // 熟食 / 即食 1 天
+  { group:'熟食', days:1, icon:'fastfood', kw:['弁当','便當','便当','惣菜','おにぎり','飯糰','飯団','サンドイッチ','サンド','サラダ','唐揚げ','から揚げ','カラアゲ','炒飯','チャーハン','グラタン','コロッケ','メンチ','丼','弁當','總菜'] },
+  // 生鮮海鮮 2 天
+  { group:'海鮮', days:2, icon:'set_meal', kw:['刺身','生魚片','サシミ','寿司','壽司','握り','握壽司','サーモン','鮭','マグロ','鮪','えび','エビ','蝦','いか','イカ','たこ','タコ','さば','サバ','鯖','ホタテ','帆立','牡蠣','あさり','しらす','ぶり','ブリ','たい','鯛','魚介','海鮮','貝'] },
+  // 加工肉 7 天（先於生肉，火腿培根不含生肉關鍵字但語意上歸這）
+  { group:'加工肉', days:7, icon:'lunch_dining', kw:['ベーコン','ハム','ウインナー','ウィンナー','ソーセージ','香腸','培根','火腿','チョリソ'] },
+  // 乳製品 8 天（先於肉類，避免「牛乳」撞「牛」）
+  { group:'乳製品', days:8, icon:'local_drink', kw:['牛乳','牛奶','ミルク','ぎゅうにゅう','ギュウニュウ','ニュウギュウ','ヨーグルト','優格','ヨーグ','チーズ','起司','モッツァレラ','生クリーム','鮮奶油','純生','純乳脂','ラクノウ'] },
+  // 生肉 3 天
+  { group:'肉類', days:3, icon:'kebab_dining', kw:['牛肉','和牛','黒毛和牛','牛バラ','牛もも','ぎゅう肉','豚','ぶた','ブタ','ポーク','鶏','とり肉','とりにく','チキン','モモ肉','もも肉','モモニク','挽肉','ひき肉','絞肉','バラ','ロース','カルビ','ステーキ','火鍋肉','肉片','ラム','ささみ','手羽','ワカドリ','若鶏'] },
+  // 豆製品 5 天
+  { group:'豆製品', days:5, icon:'spa', kw:['豆腐','とうふ','トウフ','キヌ','木綿','納豆','なっとう','厚揚げ','油揚げ','がんも'] },
+  // 麵包 4 天
+  { group:'麵包', days:4, icon:'bakery_dining', kw:['食パン','トースト','マフィン','ベーグル','クロワッサン','ブレッド','ロールパン','メロンパン','バウム','デニッシュ','フランスパン','パン'] },
+  // 易壞水果 4 天
+  { group:'水果', days:4, icon:'nutrition', kw:['いちご','苺','あまおう','バナナ','ばなな','ぶどう','葡萄','ブルーベリー','メロン','すいか','西瓜','さくらんぼ','いちじく','マンゴー','桃'] },
+  // 耐放水果 12 天
+  { group:'水果', days:12, icon:'nutrition', kw:['りんご','林檎','サンふじ','ふじ','キウイ','みかん','オレンジ','レモン','檸檬','グレープフルーツ','なし','梨','柿'] },
+  // 蔬菜 6 天
+  { group:'蔬菜', days:6, icon:'eco', kw:['レタス','萵苣','キャベツ','高麗菜','きゅうり','キュウリ','胡瓜','小黃瓜','ズッキーニ','節瓜','玉ねぎ','玉葱','タマネギ','洋蔥','ねぎ','ネギ','青蔥','ニラ','韭','なす','茄','もやし','豆芽','にんにく','ニンニク','蒜','ほうれん','小松菜','ブロッコリー','きのこ','しめじ','えのき','まいたけ','マッシュルーム','しいたけ','菇','白菜','大根','にんじん','人参','紅蘿蔔','ピーマン','パプリカ','トマト','番茄','アボカド','かぼちゃ','ごぼう','れんこん','セロリ','リーフ'] },
+  // 蛋 18 天
+  { group:'蛋', days:18, icon:'egg', kw:['卵','たまご','玉子','赤たまご','エッグ'] },
+];
+
+/* 排除：含生鮮關鍵字但其實不是食物（玩具/雜貨…） */
+const SHELF_BLOCK = ['たまごっち','タマゴッチ','びっくらたまご','びっくらタマゴ','フライパン','パンツ','パンプス','パンスト','ぱんつ','バナナクリップ','クレンジング','シャンプー','タオル','まな板','スポンジ'];
+function matchShelf(seg){
+  const s=seg.toLowerCase();
+  for(const b of SHELF_BLOCK) if(s.includes(b.toLowerCase())) return null;
+  for(const r of SHELF_RULES) for(const k of r.kw) if(s.includes(k.toLowerCase())) return r;
+  return null;
+}
+function cleanItem(seg){
+  let s=seg.replace(/[¥￥][\d,]+/g,'').replace(/\b\d[\d.,]*\b/g,'').replace(/[()（）]/g,'').trim();
+  s=s.replace(/^(7p[gl]?|7プレミアム|7premium|lw[p]?|ff|pb|p\b)\s*/i,'').trim();
+  return s.length>22 ? s.slice(0,22)+'…' : s;
+}
+function diffDays(date, today){ const a=new Date(date.y,date.m-1,date.d); const t0=new Date(today.getFullYear(),today.getMonth(),today.getDate()); return Math.round((t0-a)/86400000); }
+
+/* 回傳「估算還在冰箱裡」的生鮮清單（依剩餘天數升冪）；today 預設今天 */
+function estimateInventory(tx, today){
+  today=today||new Date();
+  const raw=[];
+  for(const t of tx){
+    if(!t.date) continue;
+    const age=diffDays(t.date, today);
+    if(age<-1 || age>45) continue;                 // 太久以前/未來太遠都跳過
+    const segs=(t.desc||'').split(/[,，、()（）/]+|\s{1,}/).map(x=>x.trim()).filter(Boolean);
+    if(!segs.length && t.cat) segs.push(t.cat);
+    for(const seg of segs){
+      const r=matchShelf(seg); if(!r) continue;
+      let shelf=r.days;
+      if(/冷凍|冷冻|frozen|アイス|氷|冰/.test(seg)) shelf=Math.max(shelf,60);  // 冷凍延長
+      const left=shelf-age;
+      if(left<-1) continue;                          // 過期 1 天以上 → 視為已吃掉/丟掉
+      raw.push({ name:cleanItem(seg)||r.group, group:r.group, icon:r.icon, date:t.date, payer:t.payer, shelf, left });
+    }
+  }
+  // 同品項只留最近一次採購（重買=補貨）
+  const map={};
+  for(const it of raw){ const k=it.group+'|'+it.name; if(!map[k]||it.date.sort>map[k].date.sort) map[k]=it; }
+  return Object.values(map).sort((a,b)=>a.left-b.left || b.date.sort-a.date.sort);
+}
+function freshLevel(left){ return left<=1?'danger':(left<=3?'warn':'fresh'); }
+function freshText(left){
+  if(left<0) return `過期 ${-left} 天`;
+  if(left===0) return '今天到期';
+  if(left===1) return '明天到期';
+  return `還剩 ${left} 天`;
+}

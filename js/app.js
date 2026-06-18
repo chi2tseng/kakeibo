@@ -12,6 +12,7 @@ const TABS = [
   { id:'category', label:'分類', icon:'donut_small' },
   { id:'split',    label:'分攤', icon:'group' },
   { id:'monthly',  label:'月份', icon:'bar_chart' },
+  { id:'fresh',    label:'保鮮', icon:'kitchen' },
   { id:'list',     label:'明細', icon:'receipt_long' },
 ];
 
@@ -143,7 +144,7 @@ function renderView(){
   const c=compute(work,S.people);
   const allWork=applyFilters(S.tx,{period:'all',exclude:S.exclude});
   const cAll=compute(allWork,S.people);
-  const r=({overview:viewOverview,settle:viewSettle,category:viewCategory,split:viewSplit,monthly:viewMonthly,list:viewList})[S.tab](c,work,cAll,allWork);
+  const r=({overview:viewOverview,settle:viewSettle,category:viewCategory,split:viewSplit,monthly:viewMonthly,fresh:viewFresh,list:viewList})[S.tab](c,work,cAll,allWork);
   const [html,after]=Array.isArray(r)?r:[r,()=>{}];
   const key=S.tab+'|'+S.period+'|'+S.exclude+'|'+S.splitView;
   const animate=key!==lastAnimKey; lastAnimKey=key;   // 背景更新不重播動畫
@@ -261,6 +262,7 @@ function viewOverview(c,work,cAll){
         ${heroSpark()}
       </div>
     </div>
+    ${freshAlertCard(estimateInventory(S.tx),true)}
     <div class="grid g-2">
       <div class="card green">${settle}</div>
       <div class="card">${paceCard}</div>
@@ -513,6 +515,45 @@ function viewMonthly(c,work,cAll,allWork){
           footer:items=>'合計 '+fmtY(items.reduce((a,b)=>a+b.parsed.y,0))}}}}}));
   };
   return [html,after];
+}
+
+/* =========================================================================
+   保鮮 — 從品項估算生鮮保存期限、提示快壞掉
+   ========================================================================= */
+function freshItemRow(it){
+  const lv=freshLevel(it.left), ratio=Math.max(0,Math.min(100,it.left/it.shelf*100));
+  return `<div class="fresh-item lv-${lv}"><span class="fresh-dot"></span>
+    <div class="fi-main">
+      <div class="fi-l1"><span class="fi-name">${esc(it.name)}</span><span class="fi-days">${freshText(it.left)}</span></div>
+      <div class="fresh-bar"><i style="width:${ratio.toFixed(0)}%"></i></div>
+      <div class="fi-sub">${it.date.iso.slice(5)} 買 · 估 ${it.shelf} 天</div>
+    </div></div>`;
+}
+function freshAlertCard(inv,compact){
+  const urgent=inv.filter(x=>x.left<=(compact?2:3));
+  if(!urgent.length) return compact?'':`<div class="card fresh-ok"><div class="fa-head ok">${ic('check_circle','fill')} 冰箱裡的生鮮都還新鮮</div></div>`;
+  const rows=(compact?urgent.slice(0,4):urgent).map(it=>`<div class="fa-row lv-${freshLevel(it.left)}"><span class="fresh-dot"></span><span class="fa-nm">${esc(it.name)}</span><span class="fa-tag">${esc(it.group)}</span><span class="fa-d">${freshText(it.left)}</span></div>`).join('');
+  const more=compact?`<div class="fa-more">${urgent.length>4?`還有 ${urgent.length-4} 樣 · `:''}查看保鮮${ic('chevron_right')}</div>`:'';
+  return `<div class="card fresh-alert${compact?' tappable':''}"${compact?` onclick="go('fresh')"`:''}>
+    <div class="fa-head">${ic('warning','fill')} ${urgent.length} 樣${compact?'快壞掉':'要快點吃'}</div>
+    <div class="fa-list">${rows}</div>${more}</div>`;
+}
+function viewFresh(){
+  const inv=estimateInventory(S.tx);
+  if(!inv.length) return [`<div class="page-head"><h2>保鮮</h2><div class="sub">估算冰箱裡的生鮮保存期限</div></div>
+    <div class="card"><div class="empty">${ic('kitchen')}<div style="margin-top:8px">最近沒有生鮮採購紀錄</div><div style="font-size:12px;margin-top:4px">買菜後在試算表記下品項，這裡就會自動抓出生鮮並估算保存期限</div></div></div>`,()=>{}];
+  const d=inv.filter(x=>x.left<=1).length, w=inv.filter(x=>x.left>1&&x.left<=3).length, f=inv.filter(x=>x.left>3).length;
+  const groups={}; for(const it of inv) (groups[it.group]=groups[it.group]||[]).push(it);
+  const groupCards=Object.entries(groups)
+    .sort((a,b)=>Math.min(...a[1].map(x=>x.left))-Math.min(...b[1].map(x=>x.left)))
+    .map(([g,items])=>`<div class="card"><div class="card-head"><h3>${ic(items[0].icon)} ${esc(g)} · ${items.length}</h3><span class="foot" style="font-size:12px;color:var(--mute)">最快 ${freshText(Math.min(...items.map(x=>x.left)))}</span></div>
+      <div class="fresh-list">${items.map(freshItemRow).join('')}</div></div>`).join('');
+  const html=`
+    <div class="page-head"><h2>保鮮</h2><div class="sub">估算冰箱裡 ${inv.length} 樣生鮮 · <span class="cdot danger"></span>${d} <span class="cdot warn"></span>${w} <span class="cdot fresh"></span>${f}</div></div>
+    ${freshAlertCard(inv,false)}
+    ${groupCards}
+    <div class="card soft" style="font-size:12px;color:var(--mute);line-height:1.65;display:flex;gap:8px;align-items:flex-start">${ic('info')}<span>保存期限是依「購買日 ＋ 一般冷藏壽命」粗估，實際以包裝標示與保存狀況為準；只抓得到記在品項說明裡的生鮮（生肉/海鮮/蔬果/乳製品/麵包/熟食…）。</span></div>`;
+  return [html,()=>{}];
 }
 
 /* =========================================================================
