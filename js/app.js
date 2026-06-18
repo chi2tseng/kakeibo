@@ -20,6 +20,7 @@ const S = {
   tx:[], people:[], months:[],
   tab:'overview', period:'all', exclude:true,   // 預設排除初期費用＋語言學校等大筆一次性支出
   search:'', fKinds:[], fCats:[], sortBy:'date', sortDir:'desc', splitView:'all',
+  dismissed:[],
   lastSync:null, loading:true, error:null, charts:[],
 };
 
@@ -34,6 +35,13 @@ if(window.Chart){
 const PREF_KEY='kakeibo.prefs', CACHE_KEY='kakeibo.cache';
 function loadPrefs(){ try{ const p=JSON.parse(localStorage.getItem(PREF_KEY)||'{}'); ['exclude','splitView','sortBy','sortDir'].forEach(k=>{ if(p[k]!=null) S[k]=p[k]; }); }catch(e){} }
 function savePrefs(){ try{ localStorage.setItem(PREF_KEY,JSON.stringify({exclude:S.exclude,splitView:S.splitView,sortBy:S.sortBy,sortDir:S.sortDir})); }catch(e){} }
+const DISMISS_KEY='kakeibo.dismissed';
+function loadDismissed(){ try{ const a=JSON.parse(localStorage.getItem(DISMISS_KEY)||'[]'); if(Array.isArray(a)) S.dismissed=a; }catch(e){} }
+function saveDismissed(){ try{ localStorage.setItem(DISMISS_KEY,JSON.stringify(S.dismissed.slice(-800))); }catch(e){} }
+function dismissKey(it){ return it.name+'|'+(it.date?it.date.sort:0); }
+function liveInventory(){ const inv=estimateInventory(S.tx); return S.dismissed.length?inv.filter(it=>!S.dismissed.includes(dismissKey(it))):inv; }
+function dismissFresh(k){ if(k&&!S.dismissed.includes(k)){ S.dismissed.push(k); saveDismissed(); } renderView(); }
+function restoreFresh(){ S.dismissed=[]; saveDismissed(); renderView(); }
 function loadCache(){ try{ const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null');
   if(c&&Array.isArray(c.tx)&&c.tx.length){ S.tx=c.tx; S.people=derivePeople(c.tx); S.months=deriveMonths(c.tx); S.lastSync=c.t?new Date(c.t):null; S.loading=false; return true; } }catch(e){} return false; }
 function saveCache(){ try{ localStorage.setItem(CACHE_KEY,JSON.stringify({t:S.lastSync?S.lastSync.getTime():Date.now(),tx:S.tx})); }catch(e){} }
@@ -69,7 +77,7 @@ function runCountUp(){
 
 /* ---------- boot ---------- */
 async function boot(){
-  loadPrefs();
+  loadPrefs(); loadDismissed();
   S.tab=tabFromHash();
   buildNav(); bindGlobal(); bindSwipe();
   if(loadCache()){ buildPeriod(); renderView(); renderSync(); loadData(false); } // 快取秒開，背景更新
@@ -262,7 +270,7 @@ function viewOverview(c,work,cAll){
         ${heroSpark()}
       </div>
     </div>
-    ${freshAlertCard(estimateInventory(S.tx),true)}
+    ${freshAlertCard(liveInventory(),true)}
     <div class="grid g-2">
       <div class="card green">${settle}</div>
       <div class="card">${paceCard}</div>
@@ -522,26 +530,29 @@ function viewMonthly(c,work,cAll,allWork){
    ========================================================================= */
 function freshItemRow(it){
   const lv=freshLevel(it.left), ratio=Math.max(0,Math.min(100,it.left/it.shelf*100));
+  const zh=(it.zh&&it.zh!==it.name)?`<span class="fi-zh">${esc(it.zh)}</span>`:'';
   return `<div class="fresh-item lv-${lv}"><span class="fresh-dot"></span>
     <div class="fi-main">
-      <div class="fi-l1"><span class="fi-name">${esc(it.name)}</span><span class="fi-days">${freshText(it.left)}</span></div>
+      <div class="fi-l1"><span class="fi-name"><span class="jp">${esc(it.name)}</span>${zh}</span><span class="fi-days">${freshText(it.left)}</span></div>
       <div class="fresh-bar"><i style="width:${ratio.toFixed(0)}%"></i></div>
       <div class="fi-sub">${it.date.iso.slice(5)} 買 · 估 ${it.shelf} 天</div>
-    </div></div>`;
+    </div>
+    <button class="fi-del" data-fk="${esc(dismissKey(it))}" title="已吃完/丟掉，從清單移除" aria-label="移除">${ic('close')}</button></div>`;
 }
 function freshAlertCard(inv,compact){
   const urgent=inv.filter(x=>x.left<=(compact?2:3));
   if(!urgent.length) return compact?'':`<div class="card fresh-ok"><div class="fa-head ok">${ic('check_circle','fill')} 冰箱裡的生鮮都還新鮮</div></div>`;
-  const rows=(compact?urgent.slice(0,4):urgent).map(it=>`<div class="fa-row lv-${freshLevel(it.left)}"><span class="fresh-dot"></span><span class="fa-nm">${esc(it.name)}</span><span class="fa-tag">${esc(it.group)}</span><span class="fa-d">${freshText(it.left)}</span></div>`).join('');
+  const rows=(compact?urgent.slice(0,4):urgent).map(it=>`<div class="fa-row lv-${freshLevel(it.left)}"><span class="fresh-dot"></span><span class="fa-nm">${esc(it.zh||it.name)}</span><span class="fa-tag">${esc(it.group)}</span><span class="fa-d">${freshText(it.left)}</span></div>`).join('');
   const more=compact?`<div class="fa-more">${urgent.length>4?`還有 ${urgent.length-4} 樣 · `:''}查看保鮮${ic('chevron_right')}</div>`:'';
   return `<div class="card fresh-alert${compact?' tappable':''}"${compact?` onclick="go('fresh')"`:''}>
     <div class="fa-head">${ic('warning','fill')} ${urgent.length} 樣${compact?'快壞掉':'要快點吃'}</div>
     <div class="fa-list">${rows}</div>${more}</div>`;
 }
 function viewFresh(){
-  const inv=estimateInventory(S.tx);
+  const inv=liveInventory();
+  const restore=S.dismissed.length?`<div class="center" style="margin-top:2px"><button class="chip" onclick="restoreFresh()">${ic('undo')} 還原已移除的 ${S.dismissed.length} 樣</button></div>`:'';
   if(!inv.length) return [`<div class="page-head"><h2>保鮮</h2><div class="sub">估算 ロピア 採購的生鮮保存期限</div></div>
-    <div class="card"><div class="empty">${ic('kitchen')}<div style="margin-top:8px">最近沒有 ロピア 生鮮採購紀錄</div><div style="font-size:12px;margin-top:4px">在 ロピア 買菜後記下品項，這裡就會自動抓出生鮮並估算保存期限</div></div></div>`,()=>{}];
+    <div class="card"><div class="empty">${ic('kitchen')}<div style="margin-top:8px">${S.dismissed.length?'清單已清空':'最近沒有 ロピア 生鮮採購紀錄'}</div><div style="font-size:12px;margin-top:4px">在 ロピア 買菜後記下品項，這裡就會自動抓出生鮮並估算保存期限</div></div></div>${restore}`,()=>{}];
   const d=inv.filter(x=>x.left<=1).length, w=inv.filter(x=>x.left>1&&x.left<=3).length, f=inv.filter(x=>x.left>3).length;
   const groups={}; for(const it of inv) (groups[it.group]=groups[it.group]||[]).push(it);
   const groupCards=Object.entries(groups)
@@ -552,8 +563,10 @@ function viewFresh(){
     <div class="page-head"><h2>保鮮</h2><div class="sub">ロピア 採購 ${inv.length} 樣生鮮 · <span class="cdot danger"></span>${d} <span class="cdot warn"></span>${w} <span class="cdot fresh"></span>${f}</div></div>
     ${freshAlertCard(inv,false)}
     ${groupCards}
-    <div class="card soft" style="font-size:12px;color:var(--mute);line-height:1.65;display:flex;gap:8px;align-items:flex-start">${ic('info')}<span>保存期限是依「購買日 ＋ 一般冷藏壽命」粗估，實際以包裝標示與保存狀況為準；只抓得到記在品項說明裡的生鮮（生肉/海鮮/蔬果/乳製品/麵包/熟食…）。</span></div>`;
-  return [html,()=>{}];
+    ${restore}
+    <div class="card soft" style="font-size:12px;color:var(--mute);line-height:1.65;display:flex;gap:8px;align-items:flex-start">${ic('info')}<span>保存期限是依「購買日 ＋ 一般冷藏壽命」粗估，實際以包裝標示與保存狀況為準；吃完或丟掉就點右側的移除鈕。</span></div>`;
+  const after=()=>{ document.querySelectorAll('.fi-del').forEach(b=>b.onclick=e=>{e.stopPropagation();dismissFresh(b.dataset.fk);}); };
+  return [html,after];
 }
 
 /* =========================================================================
