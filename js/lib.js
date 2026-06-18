@@ -196,12 +196,16 @@ function cleanItem(seg){
 }
 function diffDays(date, today){ const a=new Date(date.y,date.m-1,date.d); const t0=new Date(today.getFullYear(),today.getMonth(),today.getDate()); return Math.round((t0-a)/86400000); }
 
+/* 只統計這些店家的採購（生鮮主要在 ロピア 買；便利商店/餐廳多為即食，排除避免誤判） */
+const FRESH_STORES = ['ロピア','lopia'];
 /* 回傳「估算還在冰箱裡」的生鮮清單（依剩餘天數升冪）；today 預設今天 */
 function estimateInventory(tx, today){
   today=today||new Date();
   const raw=[];
   for(const t of tx){
     if(!t.date) continue;
+    const dl=(t.desc||'').toLowerCase();
+    if(!FRESH_STORES.some(s=>dl.includes(s))) continue;   // 只看指定店家
     const age=diffDays(t.date, today);
     if(age<-1 || age>45) continue;                 // 太久以前/未來太遠都跳過
     const segs=(t.desc||'').split(/[,，、()（）/]+|\s{1,}/).map(x=>x.trim()).filter(Boolean);

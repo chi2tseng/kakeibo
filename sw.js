@@ -1,5 +1,5 @@
 /* sw.js — network-first，離線時用快取（app shell + 上次資料皆可離線開啟） */
-const CACHE = 'kakeibo-v5';
+const CACHE = 'kakeibo-v6';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(
   caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
