@@ -30,7 +30,8 @@ if(window.Chart){
 }
 
 /* ---------- persistence (prefs + data cache → instant open) ---------- */
-const PREF_KEY='kakeibo.prefs', CACHE_KEY='kakeibo.cache';
+const PREF_KEY='kakeibo.prefs', CACHE_KEY='kakeibo.cache.v2';   // 快取帶版本：資料結構變更時不會讀到壞格式
+try{ localStorage.removeItem('kakeibo.cache'); }catch(e){}       // 清舊版 key
 function loadPrefs(){ try{ const p=JSON.parse(localStorage.getItem(PREF_KEY)||'{}'); ['exclude','splitView','sortBy','sortDir'].forEach(k=>{ if(p[k]!=null) S[k]=p[k]; }); }catch(e){} }
 function savePrefs(){ try{ localStorage.setItem(PREF_KEY,JSON.stringify({exclude:S.exclude,splitView:S.splitView,sortBy:S.sortBy,sortDir:S.sortDir})); }catch(e){} }
 function loadCache(){ try{ const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null');
@@ -67,10 +68,16 @@ function runCountUp(){
 }
 
 /* ---------- boot ---------- */
+/* 量測 topbar 實高 → --headH（sticky dayhead 依此定位，修遮擋 bug） */
+function syncHeadH(){ const tb=document.querySelector('.topbar'); if(tb) document.documentElement.style.setProperty('--headH', tb.offsetHeight+'px'); }
 async function boot(){
   loadPrefs();
   S.tab=tabFromHash();
   buildNav(); bindGlobal(); bindSwipe();
+  syncHeadH();
+  let rT; addEventListener('resize',()=>{clearTimeout(rT);rT=setTimeout(syncHeadH,150);});
+  // 回到 App/分頁時，資料超過 2 分鐘就靜默更新（背景分頁不浪費請求）
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&S.lastSync&&Date.now()-S.lastSync.getTime()>2*60*1000) loadData(false); });
   if(loadCache()){ buildPeriod(); renderView(); renderSync(); loadData(false); } // 快取秒開，背景更新
   else await loadData(true);
   setInterval(()=>loadData(false),5*60*1000);
@@ -104,15 +111,18 @@ function renderSync(){
 /* ---------- controls + nav + routing ---------- */
 function buildPeriod(){
   const w=document.getElementById('periodChips'); if(!w) return;
-  let h=`<button class="chip ${S.period==='all'?'active':''}" data-period="all">全部</button>`;
-  for(const m of S.months) h+=`<button class="chip ${S.period===m?'active':''}" data-period="${m}">${mLabel(m)}</button>`;
+  let h=`<button class="chip ${S.period==='all'?'active':''}" data-period="all" aria-pressed="${S.period==='all'}">全部</button>`;
+  for(const m of S.months) h+=`<button class="chip ${S.period===m?'active':''}" data-period="${m}" aria-pressed="${S.period===m}">${mLabel(m)}</button>`;
   w.innerHTML=h;
   w.querySelectorAll('[data-period]').forEach(b=>b.onclick=()=>{S.period=b.dataset.period;buildPeriod();renderView();});
-  document.getElementById('excludeChip').classList.toggle('on',S.exclude);
+  const ex=document.getElementById('excludeChip');
+  ex.classList.toggle('on',S.exclude);
+  ex.setAttribute('aria-pressed',S.exclude?'true':'false');   // 開關狀態播報給螢幕閱讀器
+  syncHeadH();                                                 // chips 重建後 topbar 高度可能變
 }
 function buildNav(){
   const top=document.getElementById('topTabs'), bot=document.getElementById('bottomNav');
-  const mk=t=>`<button data-tab="${t.id}" class="${S.tab===t.id?'active':''}">${ic(t.icon)}<span>${t.label}</span></button>`;
+  const mk=t=>`<button data-tab="${t.id}" class="${S.tab===t.id?'active':''}"${S.tab===t.id?' aria-current="page"':''}>${ic(t.icon)}<span>${t.label}</span></button>`;
   if(top) top.innerHTML=TABS.map(mk).join('');
   if(bot) bot.innerHTML=TABS.map(mk).join('');
   document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>go(b.dataset.tab));
@@ -121,7 +131,9 @@ function bindGlobal(){
   document.getElementById('refreshBtn').onclick=()=>loadData(false);
   document.getElementById('excludeChip').onclick=()=>{S.exclude=!S.exclude;savePrefs();buildPeriod();renderView();};
   document.getElementById('homeBtn').onclick=()=>go('overview');
-  window.addEventListener('hashchange',()=>{ const t=tabFromHash(); if(t!==S.tab){ S.tab=t; window.scrollTo({top:0}); buildNav(); renderView(); } });
+  window.addEventListener('hashchange',()=>{ const t=tabFromHash(); if(t!==S.tab){ S.tab=t; window.scrollTo({top:0}); buildNav(); renderView();
+    const v=document.getElementById('view'); if(v) v.focus({preventScroll:true});   // 切頁後焦點移到主內容（螢幕閱讀器/鍵盤）
+  } });
 }
 function tabFromHash(){ const m=location.hash.match(/^#\/([a-z]+)/); return (m&&TABS.some(t=>t.id===m[1]))?m[1]:'overview'; }
 /* 手機左右滑切換分頁（避開可橫向捲動的元件） */
@@ -150,7 +162,7 @@ function renderView(){
   v.innerHTML=`<div class="view${animate?' anim':''}">${html}</div>`;
   (after||(()=>{}))();
   if(animate) runCountUp();
-  document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===S.tab));
+  document.querySelectorAll('[data-tab]').forEach(b=>{ const on=b.dataset.tab===S.tab; b.classList.toggle('active',on); if(on) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
 }
 function periodName(){ return S.period==='all'?'全部期間':mLabelFull(S.period); }
 function focusMonth(){ return S.period!=='all'?S.period:(S.months[S.months.length-1]||null); }
@@ -238,7 +250,7 @@ function viewOverview(c,work,cAll){
     <div class="card">
       <div class="card-head"><h3>${ic('show_chart')} 變動花費累計</h3>
         <span class="legend-mini"><i style="background:#163300"></i>${mLabel(p.fm)}${p.prevYm?`<i style="background:#c2c6bc"></i>${mLabel(p.prevYm)}`:''}</span></div>
-      <div class="chart line"><canvas id="cumLine"></canvas></div>
+      <div class="chart line" role="img" aria-label="變動花費累計折線圖：${mLabel(p.fm)}與${p.prevYm?mLabel(p.prevYm):'上月'}逐日累計比較"><canvas id="cumLine"></canvas></div>
     </div>`:'';
 
   const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -401,7 +413,7 @@ function viewCategory(c){
     <div class="page-head"><h2>分類</h2><div class="sub">${periodName()} · ${fmtY(c.total)}${prevCat?` · 環比 vs ${prevYmLbl}`:''}</div></div>
     <div class="grid g-2">
       <div class="card">
-        <div class="chart donut"><canvas id="catDonut"></canvas><div class="dc"><div><div class="l">${periodName()}</div><div class="v num">${fmtY(c.total)}</div></div></div></div>
+        <div class="chart donut" role="img" aria-label="分類支出佔比圓環圖，總額 ${fmtY(c.total)}"><canvas id="catDonut"></canvas><div class="dc"><div><div class="l">${periodName()}</div><div class="v num">${fmtY(c.total)}</div></div></div></div>
         <div class="legend">${legend}</div>
       </div>
       <div class="card"><div class="card-head"><h3>${ic('leaderboard')} 排行</h3></div><div class="rows">${rank}</div></div>
@@ -444,7 +456,7 @@ function viewSplit(c){
     <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap"><div><h2>共同 / 個人</h2><div class="sub">${periodName()}${S.exclude?' · 排除大筆':''}</div></div>${seg}</div>
     <div class="grid ${showC&&showP?'g-2':''}">${showC?cCard:''}${showP?pCard:''}</div>
     ${mode==='all'
-      ? `<div class="grid g-2"><div class="card"><div class="chart donut"><canvas id="splitDonut"></canvas><div class="dc"><div><div class="l">共同佔</div><div class="v num">${pct(c.totalCommon,c.total).toFixed(0)}%</div></div></div></div></div>${barsCard}</div>`
+      ? `<div class="grid g-2"><div class="card"><div class="chart donut" role="img" aria-label="共同與個人支出佔比圓環圖，共同佔 ${pct(c.totalCommon,c.total).toFixed(0)}%"><canvas id="splitDonut"></canvas><div class="dc"><div><div class="l">共同佔</div><div class="v num">${pct(c.totalCommon,c.total).toFixed(0)}%</div></div></div></div></div>${barsCard}</div>`
       : (showC?barsCard:'')}
     <div class="grid g-2">${personCards}</div>`;
   const after=()=>{ if(mode!=='all') return; const ctx=document.getElementById('splitDonut'); if(ctx) S.charts.push(new Chart(ctx,{type:'doughnut',
@@ -488,7 +500,7 @@ function viewMonthly(c,work,cAll,allWork){
     <div class="card">
       <div class="card-head"><h3>${ic('bar_chart')} 每月支出</h3>
         <span class="legend-mini"><i style="background:#163300"></i>固定<i style="background:#9fe870"></i>變動</span></div>
-      <div class="chart-scroll"><div class="chart bars" style="min-width:${Math.max(0,months.length*52)}px"><canvas id="monthBars"></canvas></div></div>
+      <div class="chart-scroll"><div class="chart bars" role="img" aria-label="每月支出堆疊長條圖（固定＋變動）" style="min-width:${Math.max(0,months.length*52)}px"><canvas id="monthBars"></canvas></div></div>
     </div>
     <div class="card">
       <div class="card-head"><h3>${ic('calendar_month')} ${mLabelFull(fm)} ${p&&p.current&&p.varDelta!=null?deltaBadge(p.varDelta):''}</h3></div>
@@ -533,11 +545,11 @@ function listShell(){
   return `
     <div class="page-head"><h2>明細</h2></div>
     <div class="toolbar">
-      <div class="search">${ic('search')}<input id="searchInput" placeholder="搜尋品項、店名、付款人" value="${esc(S.search)}"/></div>
+      <div class="search">${ic('search')}<input id="searchInput" aria-label="搜尋交易（品項、店名、付款人）" placeholder="搜尋品項、店名、付款人" value="${esc(S.search)}"/></div>
       <div class="sortbar">
         <span class="lbl">排序</span>
         <div class="seg">${sortBtns}</div>
-        <button class="iconbtn" id="dirBtn" title="排序方向" style="width:36px;height:36px">${ic(S.sortDir==='desc'?'arrow_downward':'arrow_upward')}</button>
+        <button class="iconbtn" id="dirBtn" title="排序方向" aria-label="切換排序方向" style="width:36px;height:36px">${ic(S.sortDir==='desc'?'arrow_downward':'arrow_upward')}</button>
       </div>
       <div class="filters kindrow">${allChip}${kindChips}</div>
       <div class="filters catrow">${catChips}</div>

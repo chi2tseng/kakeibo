@@ -53,11 +53,28 @@ function monthDays(ym){ const [y,m]=ym.split('-').map(Number); return new Date(y
 function isCurrentMonth(ym){ const t=new Date(); const [y,m]=ym.split('-').map(Number); return y===t.getFullYear() && m===t.getMonth()+1; }
 function elapsedDays(ym){ return isCurrentMonth(ym) ? Math.max(1,new Date().getDate()) : monthDays(ym); }
 
-/* fetch + parse */
+/* fetch + parse — 12s 逾時、失敗重試 2 次（退避 0.6s/1.2s）、擋「試算表未公開→回登入頁 HTML」 */
+async function fetchCsvText(){
+  let lastErr;
+  for(let i=0;i<3;i++){
+    const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(),12000);
+    try{
+      const res=await fetch(CONFIG.csvUrl+'&_='+Date.now(),{cache:'no-store',signal:ctl.signal});
+      clearTimeout(t);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const text=await res.text();
+      if(/^\s*<(!doctype|html)/i.test(text)) throw new Error('試算表未公開，請設「知道連結的任何人 → 檢視者」');
+      return text;
+    }catch(e){
+      clearTimeout(t);
+      lastErr=(e&&e.name==='AbortError')?new Error('連線逾時'):e;
+      if(i<2) await new Promise(r=>setTimeout(r,600*(i+1)));
+    }
+  }
+  throw lastErr;
+}
 async function fetchTransactions(){
-  const res=await fetch(CONFIG.csvUrl+'&_='+Date.now(),{cache:'no-store'});
-  if(!res.ok) throw new Error('HTTP '+res.status);
-  const rows=Papa.parse(await res.text(),{skipEmptyLines:'greedy'}).data;
+  const rows=Papa.parse(await fetchCsvText(),{skipEmptyLines:'greedy'}).data;
   const tx=[];
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;

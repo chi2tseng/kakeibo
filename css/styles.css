@@ -3,7 +3,8 @@
    ========================================================================= */
 :root{
   --green:#9fe870; --green-soft:#e8f8db; --forest:#163300; --forest-2:#2f5d22;
-  --ink:#16170f; --body:#5b5d57; --mute:#9a9c95;
+  --ink:#16170f; --body:#5b5d57; --mute:#73756d; /* 4.5:1 on white (WCAG AA)；原 #9a9c95 只有 2.8:1 */
+  --headH:108px; /* topbar 實高，JS 開機/resize 量測回寫 */
   --line:#eceee9; --soft:#f3f5f0; --page:#f8f9f6; --white:#fff;
   --up:#c0463f;        /* 花費增加 = 紅 */
   --down:#2e9e57;      /* 花費下降 = 綠 */
@@ -16,8 +17,14 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
 body{font-family:var(--font);background:var(--page);color:var(--ink);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;-webkit-tap-highlight-color:transparent}
-button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
-a{color:inherit;text-decoration:none}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;touch-action:manipulation}
+a{color:inherit;text-decoration:none;touch-action:manipulation}
+/* 鍵盤導覽 focus ring（滑鼠點擊不觸發） */
+:focus-visible{outline:2px solid var(--forest);outline-offset:2px;border-radius:6px}
+/* 觸控目標 <44px 的元件用偽元素擴大點擊區（不改視覺）：chip 36→48、iconbtn 38→50 */
+.chip,.fchip,.iconbtn,.toggle-pill,.seg button{position:relative}
+.chip::after,.fchip::after,.iconbtn::after,.toggle-pill::after{content:"";position:absolute;inset:-6px -3px}
+.seg button::after{content:"";position:absolute;inset:-7px 0}
 ::selection{background:var(--green);color:var(--forest)}
 .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
 h1,h2,h3,h4{font-weight:600;letter-spacing:-.01em;line-height:1.15}
@@ -84,6 +91,8 @@ h1,h2,h3,h4{font-weight:600;letter-spacing:-.01em;line-height:1.15}
 .chip{flex:0 0 auto;padding:7px 15px;border-radius:var(--r-pill);font-size:13.5px;font-weight:600;color:var(--body);background:var(--white);border:1px solid var(--line);white-space:nowrap;transition:all .14s}
 .chip:hover{border-color:var(--mute)}
 .chip.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+.chip:active,.fchip:active,.seg button:active,.tabs button:active{transform:scale(.96)} /* 按壓回饋 */
+#view:focus,#view:focus-visible{outline:none} /* 程式化聚焦不畫框 */
 
 /* =========================================================================
    Layout
@@ -131,11 +140,11 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 
 /* hero */
 .hero{display:flex;flex-direction:column;gap:4px}
-.hero .eyebrow{font-size:13px;font-weight:500;color:rgba(255,255,255,.65)}
+.hero .eyebrow{font-size:13px;font-weight:500;color:rgba(255,255,255,.8)} /* 深底小字對比 ≥4.5:1 */
 .hero .big{font-size:clamp(38px,9vw,56px);font-weight:700;letter-spacing:-.03em;line-height:1.04}
 .hero .big .cur{font-size:.46em;font-weight:600;opacity:.7;vertical-align:.32em;margin-right:3px}
 .hero .legs{display:flex;gap:26px;margin-top:14px;flex-wrap:wrap}
-.hero .legs .l{font-size:12.5px;color:rgba(255,255,255,.6);font-weight:500}
+.hero .legs .l{font-size:12.5px;color:rgba(255,255,255,.78);font-weight:500}
 .hero .legs .v{font-size:18px;font-weight:600;margin-top:2px}
 
 /* uniform neutral icon (NO per-category color) */
@@ -194,7 +203,7 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 .dc .v{font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:1px}
 .legend{display:flex;flex-direction:column;gap:1px;margin-top:6px}
 .lg{display:flex;align-items:center;gap:10px;padding:8px 4px;border-radius:8px}
-.lg:hover{background:var(--soft)}
+/* .lg 圖例列非互動：無 hover */
 .lg .sw{width:9px;height:9px;border-radius:3px;flex-shrink:0}
 .lg .nm{flex:1;font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lg .vl{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
@@ -222,7 +231,7 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 .search{display:flex;align-items:center;gap:9px;background:var(--white);border:1px solid var(--line);border-radius:var(--r-md);padding:0 14px}
 .search:focus-within{border-color:var(--ink)}
 .search .ms{font-size:20px;color:var(--mute)}
-.search input{flex:1;border:none;outline:none;background:none;font-size:15px;color:var(--ink);padding:11px 0;font-family:inherit}
+.search input{flex:1;border:none;outline:none;background:none;font-size:16px;color:var(--ink);padding:11px 0;font-family:inherit} /* ≥16px 防 iOS 聚焦自動縮放 */
 .filters{display:flex;gap:8px;flex-wrap:wrap}
 .filters::-webkit-scrollbar{display:none}
 .fchip{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:var(--r-pill);font-size:13px;font-weight:600;color:var(--body);background:var(--white);border:1px solid var(--line);white-space:nowrap;transition:all .14s}
@@ -243,11 +252,11 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 
 .daygroup{margin-top:6px}
 .daygroup+.daygroup{margin-top:2px}
-.dayhead{display:flex;justify-content:space-between;align-items:baseline;padding:9px 4px 7px;position:sticky;top:calc(var(--barH) + 40px);background:var(--white);z-index:1;border-bottom:1px solid var(--line)}
+.dayhead{display:flex;justify-content:space-between;align-items:baseline;padding:9px 4px 7px;position:sticky;top:var(--headH);background:var(--white);z-index:1;border-bottom:1px solid var(--line)} /* --headH=topbar 實高（JS 量測），修 sticky 遮擋 */
 .dayhead .d{font-size:12.5px;font-weight:600;color:var(--body)}
 .dayhead .t{font-size:12.5px;font-weight:600;color:var(--mute);font-variant-numeric:tabular-nums}
 .tx{display:flex;align-items:center;gap:12px;padding:9px 8px;border-radius:var(--r-md)}
-.tx:hover{background:var(--soft)}
+/* .tx 非互動列：不給 hover 底色，避免看起來可點 */
 .tx .body{flex:1;min-width:0}
 .tx .t1{font-weight:500;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tx .t2{font-size:11.5px;color:var(--mute);margin-top:2px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
@@ -290,7 +299,7 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 
 .hero .legs{align-items:flex-end}
 .spark-wrap{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
-.spark-wrap span{font-size:10.5px;color:rgba(255,255,255,.45);font-weight:500;line-height:1}
+.spark-wrap span{font-size:10.5px;color:rgba(255,255,255,.65);font-weight:500;line-height:1}
 
 /* 月曆熱力圖 */
 .hm{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:12px 0 18px}
@@ -320,6 +329,10 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
 @media(prefers-reduced-motion:reduce){
   .view.anim>*{animation:none}
   .card,.card:hover{transition:none;transform:none}
+  .progress.on::before{animation:none}
+  .refresh-btn.loading .refresh-svg,.refresh-btn.loading .r-arc,.refresh-btn.loading .r-head{animation:none}
+  .bar>i,.ctrack .line>i,.pay-bar>i{transition:none}
+  .skel{animation:none}
 }
 
 /* =========================================================================
@@ -339,7 +352,7 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 40px}
   .card{padding:16px;border-radius:var(--r-lg)}
   .page-head h2{font-size:20px}
   .hero .big{font-size:clamp(34px,11vw,46px)}
-  .dayhead{top:calc(var(--barH) + 39px)}
+  .dayhead{top:var(--headH)} /* 手機也用實測高度 */
   .bottomnav{display:flex;position:fixed;bottom:0;left:0;right:0;z-index:60;background:rgba(255,255,255,.94);backdrop-filter:blur(16px) saturate(180%);-webkit-backdrop-filter:blur(16px) saturate(180%);border-top:1px solid var(--line);padding:6px 4px calc(4px + env(safe-area-inset-bottom));justify-content:space-around}
   .bottomnav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 2px;color:var(--mute);font-size:10px;font-weight:600;transition:color .15s}
   .bottomnav button .ms{font-size:23px}

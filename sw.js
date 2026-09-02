@@ -1,5 +1,5 @@
 /* sw.js — network-first，離線時用快取（app shell + 上次資料皆可離線開啟） */
-const CACHE = 'kakeibo-v8';
+const CACHE = 'kakeibo-v10';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(
   caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
@@ -7,6 +7,8 @@ self.addEventListener('activate', e => e.waitUntil(
 ));
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // Google Sheet CSV 每次帶時間戳、URL 都不同 → 不進 SW 快取（否則無限增長）；離線資料由 localStorage 負責
+  if (new URL(e.request.url).hostname.endsWith('google.com')) return;
   e.respondWith(
     fetch(e.request).then(r => {
       const copy = r.clone();
