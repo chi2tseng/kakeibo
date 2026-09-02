@@ -49,7 +49,7 @@ function personBadge(p,i,lg){
 function personTag(p,i){ const av=personBadge(p,i); return p.length>1?`${av}<span>${esc(p)}</span>`:av; }
 function pct(a,b){ return b?(a/b*100):0; }
 function compact(n){ n=Math.abs(n); if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1)+'M'; if(n>=1e3) return Math.round(n/1e3)+'k'; return ''+Math.round(n); }
-function mLabel(ym){ return ym?(+ym.split('-')[1])+'月':''; }
+function mLabel(ym){ if(!ym) return ''; const [y,m]=ym.split('-'); const multiYear=S.months.length>0&&new Set(S.months.map(x=>x.slice(0,4))).size>1; return multiYear?`${y.slice(2)}年${+m}月`:`${+m}月`; } /* 跨年資料自動帶年份 */
 function mLabelFull(ym){ if(!ym) return ''; const [y,m]=ym.split('-'); return `${y} 年 ${+m} 月`; }
 function destroyCharts(){ S.charts.forEach(c=>{try{c.destroy()}catch(e){}}); S.charts=[]; }
 function moneyTooltip(totalRef){ return {callbacks:{label(ctx){const v=ctx.parsed.y!=null?ctx.parsed.y:ctx.parsed;const tot=typeof totalRef==='function'?totalRef():totalRef;const p=tot?` · ${(v/tot*100).toFixed(1)}%`:'';const nm=ctx.label?ctx.label+': ':'';return `${nm}${fmtY(v)}${p}`;}}}; }
