@@ -386,7 +386,7 @@ function listShell(c){
   const trend=S.months.length>1?`
     <div class="card pad-sm">
       <div class="card-head"><h3>${ic('bar_chart')} 每月</h3><span class="legend-mini"><i style="background:#163300"></i>固定<i style="background:#9fe870"></i>變動</span></div>
-      <div class="chart-scroll" id="monthScroll"><div class="chart bars" role="img" aria-label="每月支出（固定＋變動），點長條切換月份" style="min-width:${S.months.length*40}px"><canvas id="monthBars"></canvas></div></div>
+      <div class="chart-scroll" id="monthScroll"><div class="chart bars" role="img" aria-label="每月支出（固定＋變動），點長條切換月份" style="min-width:${S.months.length*32}px"><canvas id="monthBars"></canvas></div></div>
     </div>`:'';
   const noFilter=!S.fKinds.length&&!S.fCats.length;
   const kindChips=`<button class="fchip ${noFilter?'active':''}" data-all="1">全部</button>`
