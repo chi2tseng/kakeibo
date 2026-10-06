@@ -181,7 +181,6 @@ function renderView(){
   if(animate) runCountUp();
   document.querySelectorAll('[data-tab]').forEach(b=>{ const on=b.dataset.tab===S.tab; b.classList.toggle('active',on); if(on) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
 }
-function periodName(){ return S.period==='all'?'全部期間':mLabelFull(S.period); }
 function focusMonth(){ return S.period!=='all'?S.period:(S.months[S.months.length-1]||null); }
 
 /* pace — 固定費（房租/學費等，金額預先決定）不反映花費行為 → 從比較排除；
@@ -200,11 +199,13 @@ function pace(){
   const prev=prevYm?sumMonth(prevYm):null;
   const varProj=current?(cur.vari/days)*dim:cur.vari;            // 變動：按已過天數配速
   const prevVar=prev?prev.vari:null;
-  const varDelta=(prevVar&&prevVar>0)?(varProj-prevVar)/prevVar*100:null;
+  // 本月進行中 → 比「日均」（今天幾號就除幾天，不外推）；已過完的月 → 比整月
+  const dayAvg=cur.vari/days, prevDayAvg=prev?prev.vari/monthDays(prevYm):null;
+  const varDelta=current?(prevDayAvg>0?(dayAvg-prevDayAvg)/prevDayAvg*100:null):((prevVar&&prevVar>0)?(cur.vari-prevVar)/prevVar*100:null);
   const fixedEst=prev?Math.max(cur.fixedRec,prev.fixedRec):cur.fixedRec;  // 經常性固定：沿用上月
   const projTotal=varProj+fixedEst+cur.one;                      // 一次性：本月已發生的照實計，不投影
   return {fm,current,days,dim,total:cur.total,fixed:cur.fixedRec,one:cur.one,vari:cur.vari,
-    varProj,prevVar,varDelta,fixedEst,projTotal,prevYm,prevTotal:prev?prev.total:null};
+    varProj,prevVar,dayAvg,prevDayAvg,varDelta,fixedEst,projTotal,prevYm,prevTotal:prev?prev.total:null};
 }
 function deltaBadge(d){
   if(d==null) return '';
@@ -238,15 +239,17 @@ function viewOverview(c,work){
         <div class="metric">
           <div class="label">${ic('swap_horiz')} 結算</div>
           <div class="value">${cnt(st.amount,true)}</div>
-          <div class="flow-mini">${personBadge(st.from,c.people.indexOf(st.from))}${ic('arrow_forward')}${personBadge(st.to,c.people.indexOf(st.to))}</div>
+          <div class="flow-mini">${personBadge(st.from,c.people.indexOf(st.from))}<span>要還給</span>${personBadge(st.to,c.people.indexOf(st.to))}</div>
         </div></div>`
     : `<div class="card green"><div class="metric"><div class="label">${ic('swap_horiz')} 結算</div><div class="value settled">${ic('check_circle','fill')} 已結清</div></div></div>`;
 
   const p=pace();
   const paceCard=p?`<div class="card"><div class="metric">
-      <div class="label">${ic('calendar_month')} ${mLabel(p.fm)}${p.current?` · 第 ${p.days} 天`:''}${p.current&&p.varDelta!=null?deltaBadge(p.varDelta):''}</div>
+      <div class="label">${ic('calendar_month')} ${mLabel(p.fm)} 已花${p.current?` · 第 ${p.days} 天`:''}</div>
       <div class="value">${cnt(p.total,true)}</div>
-      <div class="foot">${p.current?'變動估':'變動'} ${fmtY(p.current?p.varProj:p.vari)}${p.prevVar!=null?` · 上月 ${fmtY(p.prevVar)}`:''}</div>
+      <div class="foot">${p.current
+        ?`變動日均 ${fmtY(p.dayAvg)}${p.prevDayAvg!=null?` · 上月 ${fmtY(p.prevDayAvg)}`:''}`
+        :`變動 ${fmtY(p.vari)}${p.prevVar!=null?` · 上月 ${fmtY(p.prevVar)}`:''}`}${deltaBadge(p.varDelta)}</div>
     </div></div>`:'';
 
   // 變動累計曲線：本月 vs 上月（一眼看配速）
@@ -318,21 +321,20 @@ function viewSettle(c){
     ? `<div class="settle zero">${ic('check_circle','fill')}<div class="cap" style="margin-top:8px">這段期間已結清</div></div>`
     : `<div class="settle">
       <div class="flow">
-        <div class="who lg">${esc(st.from[0])}</div>
+        ${personBadge(st.from,c.people.indexOf(st.from),true)}
         <div class="ar">${ic('arrow_forward')}</div>
-        <div class="who lg alt">${esc(st.to[0])}</div>
+        ${personBadge(st.to,c.people.indexOf(st.to),true)}
       </div>
       <div class="amt num"><span class="cur">¥</span>${cnt(st.amount)}</div>
       <div class="cap"><b>${esc(st.from)}</b> 要還給 <b>${esc(st.to)}</b></div>
     </div>`;
 
-  // 共同支出誰墊得多（結算的依據）
+  // 共同支出誰墊得多（結算的依據；差額就是上面的結算金額，不再重複列）
   const maxC=Math.max(...c.people.map(p=>c.commonByPerson[p]||0),1);
   const bars=c.people.map((p,i)=>{
-    const v=c.commonByPerson[p]||0,diff=v-c.fairShare;
+    const v=c.commonByPerson[p]||0;
     return `<div class="ctrack"><div class="top"><b>${personTag(p,i)}</b><span class="num">${fmtY(v)}</span></div>
-      <div class="line"><i style="width:${pct(v,maxC)}%;background:${PERSON_CHART[i]}"></i></div>
-      <div class="foot">${diff>=0?'多墊':'少墊'} ${fmtY(Math.abs(diff))}</div></div>`;
+      <div class="line"><i style="width:${pct(v,maxC)}%;background:${PERSON_CHART[i]}"></i></div></div>`;
   }).join('');
 
   // 每個人花在哪：全部 / 共同 / 個人
@@ -354,13 +356,12 @@ function viewSettle(c){
     if(showC) inner+=`<div class="subhead"><span>${ic('group')} 共同墊付</span><b>${fmtY(cTot)}</b></div><div class="rows">${mkRows(common,col)}</div>`;
     if(showP) inner+=`<div class="subhead"${showC?' style="margin-top:14px"':''}><span>${ic('person')} 個人</span><b>${fmtY(pTot)}</b></div><div class="rows">${mkRows(personal,col)}</div>`;
     return `<div class="card">
-      <div class="card-head"><h3>${personTag(p,i)}</h3><span class="num" style="font-weight:700">${fmtY((showC?cTot:0)+(showP?pTot:0))}</span></div>
+      <div class="card-head"><h3>${personTag(p,i)}</h3><span class="num" style="font-weight:600">${fmtY((showC?cTot:0)+(showP?pTot:0))}</span></div>
       ${inner}</div>`;
   }).join('');
   const seg=`<div class="seg" role="group" aria-label="顯示範圍">${[['all','全部'],['common','共同'],['personal','個人']].map(([k,l])=>`<button class="${mode===k?'active':''}" aria-pressed="${mode===k}" onclick="setSplitView('${k}')">${l}</button>`).join('')}</div>`;
 
   const html=`
-    <div class="page-head"><h2>結算</h2><div class="sub">${periodName()}${S.exclude?' · 排除大筆':''}</div></div>
     <div class="card green">${hero}</div>
     <div class="card">
       <div class="card-head"><h3>${ic('account_balance_wallet')} 共同支出誰墊的</h3><span class="foot">每人應付 ${fmtY(c.fairShare)}</span></div>
@@ -376,9 +377,12 @@ function viewSettle(c){
    ========================================================================= */
 function viewList(c){ return [listShell(c), mountList]; }
 function listShell(c){
-  const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]), colors=chartColors(cats.length);
-  const comp=`<div class="pay-bar" role="img" aria-label="分類組成：${esc(cats.slice(0,5).map(([n,a])=>`${n} ${pct(a,c.total).toFixed(0)}%`).join('、'))}">${cats.map(([n,a],i)=>`<i style="width:${pct(a,c.total)}%;background:${colors[i]}" title="${esc(n)} ${fmtY(a)}"></i>`).join('')}</div>`;
-  const catChips=cats.map(([n,a],i)=>`<button class="fchip ${S.fCats.includes(n)?'active':''}" data-cat="${esc(n)}" aria-pressed="${S.fCats.includes(n)}"><span class="dot" style="background:${colors[i]}"></span>${esc(n)}<span class="fa num">¥${compact(a)}</span></button>`).join('');
+  // 前 5 類用綠色階，其餘一律灰色並在組成條合併成「其他」（12 階顏色太花，淡色還會融進白底）
+  const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]), TOP=5, OTHER='#aab0a1', colOf=i=>i<TOP?CHART_SCALE[i]:OTHER;
+  const segs=cats.slice(0,TOP).map(([n,a],i)=>[n,a,colOf(i)]), restSum=cats.slice(TOP).reduce((s,x)=>s+x[1],0);
+  if(restSum>0) segs.push([`其他 ${cats.length-TOP} 類`,restSum,OTHER]);
+  const comp=`<div class="pay-bar" role="img" aria-label="分類組成：${esc(segs.map(([n,a])=>`${n} ${pct(a,c.total).toFixed(0)}%`).join('、'))}">${segs.map(([n,a,col])=>`<i style="width:${pct(a,c.total)}%;background:${col}" title="${esc(n)} ${fmtY(a)}"></i>`).join('')}</div>`;
+  const catChips=cats.map(([n,a],i)=>`<button class="fchip ${S.fCats.includes(n)?'active':''}" data-cat="${esc(n)}" aria-pressed="${S.fCats.includes(n)}"><span class="dot" style="background:${colOf(i)}"></span>${esc(n)}<span class="fa num">¥${compact(a)}</span></button>`).join('');
   const trend=S.months.length>1?`
     <div class="card pad-sm">
       <div class="card-head"><h3>${ic('bar_chart')} 每月</h3><span class="legend-mini"><i style="background:#163300"></i>固定<i style="background:#9fe870"></i>變動</span></div>
@@ -388,10 +392,14 @@ function listShell(c){
   const kindChips=`<button class="fchip ${noFilter?'active':''}" data-all="1">全部</button>`
     +[['共同','group'],['個人','person']].map(([k,i])=>`<button class="fchip ${S.fKinds.includes(k)?'active':''}" data-kind="${k}" aria-pressed="${S.fKinds.includes(k)}">${ic(i)}${k}</button>`).join('');
   const views=[['list','view_agenda','清單'],['photo','photo_library','收據照片']].map(([k,i,l])=>`<button data-view="${k}" class="${S.listView===k?'active':''}" aria-pressed="${S.listView===k}" aria-label="${l}" title="${l}">${ic(i)}</button>`).join('');
+  // 手機：由上往下一欄；桌機：左欄（每月＋分類，sticky）、右欄（工具列＋清單）
   return `
-    <div class="page-head"><h2>明細</h2><div class="sub">${periodName()} · ${fmtY(c.total)}${S.exclude?' · 排除大筆':''}</div></div>
+   <div class="list-layout">
+    <div class="list-side">
     ${trend}
     ${cats.length?`<div class="card pad-sm"><div class="card-head"><h3>${ic('donut_small')} 分類</h3></div>${comp}<div class="filters cats">${catChips}</div></div>`:''}
+    </div>
+    <div class="list-main">
     <div class="toolbar">
       <div class="tool-row">
         <label class="search">${ic('search')}<input id="searchInput" type="search" enterkeyhint="search" aria-label="搜尋店名、品項、付款人" placeholder="搜尋店名、品項" value="${esc(S.search)}"/></label>
@@ -402,7 +410,9 @@ function listShell(c){
         <button class="sortbtn" id="sortBtn">${ic('swap_vert')}<span></span></button>
       </div>
     </div>
-    <div id="listBody"></div>`;
+    <div id="listBody"></div>
+    </div>
+   </div>`;
 }
 function mountList(){
   drawMonthBars();
@@ -465,7 +475,8 @@ function listRows(){
       :emptyState('photo_library','沒有收據照片','在 LINE 傳收據給記帳機器人，照片會自動出現在這裡'));
   if(S.sort.startsWith('date')){
     const g=new Map(); for(const t of rows){ const k=t.date?t.date.iso:'—'; if(!g.has(k)) g.set(k,[]); g.get(k).push(t); }
-    const groups=[...g.values()].map(ts=>`<div class="daygroup"><div class="dayhead"><span class="d">${ts[0].date?dayLabel(ts[0].date):'無日期'}</span><span class="t num">${fmtY(ts.reduce((a,b)=>a+b.amt,0))}</span></div>${ts.map(t=>txRow(t,false)).join('')}</div>`).join('');
+    // 當天只有一筆 → 小計就是那筆金額，不重複顯示
+    const groups=[...g.values()].map(ts=>`<div class="daygroup"><div class="dayhead"><span class="d">${ts[0].date?dayLabel(ts[0].date):'無日期'}</span>${ts.length>1?`<span class="t num">${fmtY(ts.reduce((a,b)=>a+b.amt,0))}</span>`:''}</div>${ts.map(t=>txRow(t,false)).join('')}</div>`).join('');
     return head+`<div class="card pad-sm" data-seq="list">${groups}</div>`;
   }
   return head+`<div class="card pad-sm" data-seq="list">${rows.map(t=>txRow(t,true)).join('')}</div>`;
@@ -550,7 +561,7 @@ function buildDetailEl(){
   el.innerHTML=`
     <div class="dt-top">
       <span class="dt-count num"></span>
-      <a class="dt-btn dt-orig" target="_blank" rel="noopener" aria-label="開啟原圖">${ic('open_in_new')}</a>
+      <a class="dt-btn dt-orig" target="_blank" rel="noopener" aria-label="開啟原圖">${ic('open_in_new')}<span>原圖</span></a>
       <button class="dt-btn dt-close" aria-label="關閉">${ic('close')}</button>
     </div>
     <div class="dt-stage">
@@ -594,10 +605,20 @@ function closeDetail(fromPop){
   if(DT.ret&&document.contains(DT.ret)) DT.ret.focus({preventScroll:true});
 }
 function stepDetail(d){ const n=DT.i+d; if(!DT.open||n<0||n>=DT.seq.length) return; DT.i=n; renderDetail(); }
+const ITEM_RE=/^(.*?)\s*[:：]?\s*[¥￥]\s*([\d,]+(?:\.\d+)?)\s*$/;
 function itemRow(s){
-  const m=s.match(/^(.*?)\s*[:：]?\s*[¥￥]\s*([\d,]+(?:\.\d+)?)\s*$/);
+  const m=s.match(ITEM_RE);
   return m?`<li><span>${esc(m[1]||'—')}</span><span class="num">¥${esc(m[2])}</span></li>`:`<li><span>${esc(s)}</span></li>`;
 }
+/* 品項都有標價、加總又少於總額 → 補一列差額（多半是外加消費稅），免得看起來像漏了品項 */
+function restRow(items,amt){
+  const ps=items.map(s=>{ const m=s.match(ITEM_RE); return m?+m[2].replace(/,/g,''):null; });
+  if(!ps.length||ps.some(x=>x==null)) return '';
+  const d=Math.round(amt-ps.reduce((a,b)=>a+b,0));
+  return d>0?`<li class="rest"><span>其他（稅等）</span><span class="num">¥${fmt(d)}</span></li>`:'';
+}
+function shortDate(dt){ const w='日一二三四五六'[new Date(dt.y,dt.m-1,dt.d).getDay()]; return `${dt.y!==new Date().getFullYear()?dt.y+'/':''}${dt.m}/${dt.d} 週${w}`; }
+function rcFail(img){ const box=img.closest('.dt-img'); if(!box) return; box.style.backgroundImage='none'; box.innerHTML=`<div class="dt-noimg">${ic('broken_image')}<span>照片載入失敗</span></div>`; }
 function renderDetail(){
   const t=S.tx[DT.seq[DT.i]]; if(!t) return closeDetail();
   const el=DT.el, items=itemsOf(t), n=DT.seq.length;
@@ -609,20 +630,21 @@ function renderDetail(){
   el.querySelectorAll('.dt-nav').forEach(b=>b.hidden=n<2);
   const box=el.querySelector('.dt-img');
   box.style.backgroundImage=t.rc?`url("${thumbOf(t.rc)}")`:'none';   // 先顯示縮圖，原圖載好再蓋上
+  // 點照片 = 新分頁開原圖（手機可以兩指放大看小字）
   box.innerHTML=t.rc
-    ?`<img src="${esc(t.rc)}" alt="${esc(storeOf(t))} 收據照片" onload="this.classList.add('ok')" onerror="this.parentNode.style.backgroundImage='none';this.outerHTML='<div class=&quot;dt-noimg&quot;><span class=&quot;ms&quot;>broken_image</span>照片載入失敗</div>'">`
+    ?`<a class="dt-zoom" href="${esc(t.rc)}" target="_blank" rel="noopener" aria-label="開啟原圖放大"><img src="${esc(t.rc)}" alt="${esc(storeOf(t))} 收據照片" onload="this.classList.add('ok')" onerror="rcFail(this)"></a>`
     :`<div class="dt-noimg">${ic('hide_image')}<span>沒有收據照片</span></div>`;
   el.querySelector('.dt-info').innerHTML=`
     <div class="dt-amt num">${fmtY(t.amt)}</div>
     <div class="dt-store" id="dtTitle">${esc(storeOf(t))}</div>
     <div class="dt-meta">
-      ${t.date?`<span>${ic('event')}${t.date.iso}</span>`:''}
+      ${t.date?`<span>${ic('event')}${shortDate(t.date)}</span>`:''}
       <span>${ic(catIcon(t.cat))}${esc(t.cat)}</span>
       <span>${ic('person')}${esc(t.payer||'—')}</span>
       <span>${ic(payMeta(t.method||'其他').ic)}${esc(t.method||'—')}</span>
       <span class="${t.kind==='共同'?'c':''}">${ic(t.kind==='共同'?'group':'person_outline')}${esc(t.kind||'—')}</span>
     </div>
-    ${items.length?`<ul class="dt-items">${items.map(itemRow).join('')}</ul>`:''}`;
+    ${items.length?`<ul class="dt-items">${items.map(itemRow).join('')}${restRow(items,t.amt)}</ul>`:''}`;
   el.querySelector('.dt-info').scrollTop=0;
   // 預載前後一筆的原圖，左右切換不用等
   [DT.seq[DT.i-1],DT.seq[DT.i+1]].forEach(j=>{ const x=S.tx[j]; if(x&&x.rc){ const im=new Image(); im.decoding='async'; im.src=x.rc; } });

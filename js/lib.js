@@ -26,7 +26,6 @@ function catIcon(name){ return CAT_ICON[name] || 'sell'; }
 
 /* cohesive green→sage→neutral scale for charts (NO rainbow) */
 const CHART_SCALE = ['#163300','#2f5d22','#4e8c33','#74b84b','#9fe870','#bfe4a1','#8a9282','#aab0a1','#c8ccc0','#dde0d6','#5b5d57','#e8ebe4'];
-function chartColors(n){ const out=[]; for(let i=0;i<n;i++) out.push(CHART_SCALE[i % CHART_SCALE.length]); return out; }
 const PERSON_CHART = ['#163300', '#9fe870', '#74b84b', '#bfe4a1']; // forest vs lime (on-brand)
 
 /* formatting */
@@ -93,9 +92,15 @@ const RC_URL=/^https:\/\/storage\.googleapis\.com\/[\w.\-]+\/[^\s"'<>]+\.(jpe?g|
 
 /* 說明欄格式「店名 (品項 ¥1, 品項 ¥2)」→ 店名 / 品項清單（標題只顯示店名，品項放詳情） */
 function storeOf(t){ const d=t.desc||''; const i=d.search(/\s*[（(]/); const s=(i>0?d.slice(0,i):d).trim(); return s||t.cat; }
+/* 品名本身可能有逗號（Ziploc Freezer Bag, M）→ 有標價時只在數字後面的「, 」「、」切 */
 function itemsOf(t){
   const d=t.desc||''; const i=d.search(/[（(]/); if(i<0) return [];
-  return d.slice(i).replace(/^[（(]|[)）]$/g,'').split(/[)）]\s*[（(]|,\s+|、/).map(s=>s.trim()).filter(Boolean);
+  return d.slice(i).replace(/^[（(]|[)）]$/g,'').split(/[)）]\s*[（(]/).flatMap(s=>{
+    if(!/[¥￥]\s?\d/.test(s)) return s.split(/,\s+|、/);
+    const p=s.split(/(\d)(?:,\s+|\s*、\s*)/), out=[];   // [品名…, 末位數字, 品名…, 末位數字, …, 最後一項]
+    for(let k=0;k<p.length;k+=2) out.push(p[k]+(p[k+1]||''));
+    return out;
+  }).map(x=>x.trim()).filter(Boolean);
 }
 
 function derivePeople(tx){
