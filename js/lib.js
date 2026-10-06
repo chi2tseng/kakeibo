@@ -81,10 +81,21 @@ async function fetchTransactions(){
     const cat=(r[0]||'').trim(), amtRaw=r[2];
     if(!cat||amtRaw==null||String(amtRaw).trim()==='') continue;
     const amt=parseAmount(amtRaw); if(!amt) continue;
-    tx.push({cat,date:parseDate(r[1]),amt,desc:(r[3]||'').trim(),method:(r[4]||'').trim(),payer:(r[5]||'').trim(),kind:(r[6]||'').trim()});
+    const rc=(r[7]||'').trim();   // H 欄：LINE bot 存檔的收據照片網址（純文字）
+    tx.push({cat,date:parseDate(r[1]),amt,desc:(r[3]||'').trim(),method:(r[4]||'').trim(),payer:(r[5]||'').trim(),kind:(r[6]||'').trim(),
+      rc:RC_URL.test(rc)?rc:''});
   }
   tx.sort((a,b)=>(a.date?.sort||0)-(b.date?.sort||0));
+  tx.forEach((t,i)=>t.id=i);
   return tx;
+}
+const RC_URL=/^https:\/\/storage\.googleapis\.com\/[\w.\-]+\/[^\s"'<>]+\.(jpe?g|png|webp)$/i;
+
+/* 說明欄格式「店名 (品項 ¥1, 品項 ¥2)」→ 店名 / 品項清單（標題只顯示店名，品項放詳情） */
+function storeOf(t){ const d=t.desc||''; const i=d.search(/\s*[（(]/); const s=(i>0?d.slice(0,i):d).trim(); return s||t.cat; }
+function itemsOf(t){
+  const d=t.desc||''; const i=d.search(/[（(]/); if(i<0) return [];
+  return d.slice(i).replace(/^[（(]|[)）]$/g,'').split(/[)）]\s*[（(]|,\s+|、/).map(s=>s.trim()).filter(Boolean);
 }
 
 function derivePeople(tx){

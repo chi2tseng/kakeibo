@@ -11,14 +11,17 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%239fe870'/><text x='50' y='73' font-size='60' text-anchor='middle' font-family='sans-serif' font-weight='700' fill='%23163300'>¥</text></svg>" />
+  <!-- logo：收據（LINE 拍收據就記帳） -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%23163300'/><path d='M10.5 6.5h11a1.5 1.5 0 0 1 1.5 1.5V24l-2.33 1.5L18.33 24 16 25.5 13.67 24l-2.34 1.5L9 24V8a1.5 1.5 0 0 1 1.5-1.5Z' fill='%239fe870'/><rect x='12' y='10.5' width='8' height='1.8' rx='.9' fill='%23163300'/><rect x='12' y='14.5' width='8' height='1.8' rx='.9' fill='%23163300'/><rect x='12' y='18.5' width='5' height='1.8' rx='.9' fill='%23163300'/></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preconnect" href="https://docs.google.com" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <!-- 圖示字型用 block：載入前不顯示 ligature 文字（避免「dashboard」字樣閃一下） -->
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300,0,0&display=block" rel="stylesheet" />
+  <!-- 圖示字型：只載用得到的圖示（916KB → 51KB），含 wght 300–400 與實心 FILL。
+       新增圖示一定要加進 icon_names（字母排序），否則會顯示成英文字。
+       display=block：載入前不顯示 ligature 文字（避免「dashboard」字樣閃一下） -->
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300..400,0..1,0&icon_names=account_balance,account_balance_wallet,apparel,arrow_forward,bar_chart,bolt,broken_image,calendar_month,chair,check_circle,chevron_left,chevron_right,close,cloud_done,cloud_off,contactless,content_cut,credit_card,dashboard,donut_small,event,filter_alt,flight,gas_meter,group,health_and_safety,hide_image,home,inventory_2,medication,more_horiz,open_in_new,payments,person,person_outline,pets,photo_library,qr_code_2,receipt_long,redeem,restaurant,schedule,school,search,search_off,sell,shield,shopping_bag,shopping_basket,show_chart,smartphone,sports_esports,swap_horiz,swap_vert,tram,trending_down,trending_flat,trending_up,view_agenda,water_drop&display=block" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
@@ -28,7 +31,13 @@
     <header class="topbar">
       <div class="bar-main">
         <button class="brand" id="homeBtn" title="回到總覽" aria-label="回到總覽">
-          <span class="logo">¥</span>
+          <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="9" fill="#163300"/>
+            <path d="M10.5 6.5h11a1.5 1.5 0 0 1 1.5 1.5V24l-2.33 1.5L18.33 24 16 25.5 13.67 24l-2.34 1.5L9 24V8a1.5 1.5 0 0 1 1.5-1.5Z" fill="#9fe870"/>
+            <rect x="12" y="10.5" width="8" height="1.8" rx=".9" fill="#163300"/>
+            <rect x="12" y="14.5" width="8" height="1.8" rx=".9" fill="#163300"/>
+            <rect x="12" y="18.5" width="5" height="1.8" rx=".9" fill="#163300"/>
+          </svg>
         </button>
 
         <nav class="tabs desktop" id="topTabs" aria-label="主要導覽"></nav>

@@ -1,24 +1,23 @@
 /* =========================================================================
-   app.js — UI: routing, rendering, charts (v3 · app-grade)
-   v3: hash routing / localStorage prefs / data cache (秒開) / PWA
-       count-up 數字動畫 / 卡片進場 / 手機滑動換頁
-       變動累計曲線 / 固定+變動堆疊月圖 / 月曆熱力圖 / 分類環比
+   app.js — UI: routing, rendering, charts (v4 · 三頁精簡版)
+   總覽：一眼看完（總額、結算、本月配速、累計曲線、分類前五、最近 5 筆）
+   結算：誰還誰＋共同墊付＋每個人花在哪（原「分攤」）
+   明細：每月長條＋分類（兼篩選）＋交易清單／收據照片牆；點任一筆看大圖與品項
    ========================================================================= */
 'use strict';
 
 const TABS = [
   { id:'overview', label:'總覽', icon:'dashboard' },
   { id:'settle',   label:'結算', icon:'swap_horiz' },
-  { id:'category', label:'分類', icon:'donut_small' },
-  { id:'split',    label:'分攤', icon:'group' },
-  { id:'monthly',  label:'月份', icon:'bar_chart' },
   { id:'list',     label:'明細', icon:'receipt_long' },
 ];
+const TAB_ALIAS = { split:'settle', category:'list', monthly:'list', analysis:'list', receipts:'list' };   // 舊網址/書籤照樣能開
+const SORTS = [['date-desc','新→舊'],['date-asc','舊→新'],['amt-desc','金額高→低'],['amt-asc','金額低→高']];
 
 const S = {
   tx:[], people:[], months:[],
   tab:'overview', period:'all', exclude:true,   // 預設排除初期費用＋語言學校等大筆一次性支出
-  search:'', fKinds:[], fCats:[], sortBy:'date', sortDir:'desc', splitView:'all',
+  search:'', fKinds:[], fCats:[], sort:'date-desc', listView:'list', splitView:'all',
   lastSync:null, loading:true, error:null, charts:[],
 };
 
@@ -30,17 +29,20 @@ if(window.Chart){
 }
 
 /* ---------- persistence (prefs + data cache → instant open) ---------- */
-const PREF_KEY='kakeibo.prefs', CACHE_KEY='kakeibo.cache.v2';   // 快取帶版本：資料結構變更時不會讀到壞格式
-try{ localStorage.removeItem('kakeibo.cache'); }catch(e){}       // 清舊版 key
-function loadPrefs(){ try{ const p=JSON.parse(localStorage.getItem(PREF_KEY)||'{}'); ['exclude','splitView','sortBy','sortDir'].forEach(k=>{ if(p[k]!=null) S[k]=p[k]; }); }catch(e){} }
-function savePrefs(){ try{ localStorage.setItem(PREF_KEY,JSON.stringify({exclude:S.exclude,splitView:S.splitView,sortBy:S.sortBy,sortDir:S.sortDir})); }catch(e){} }
+const PREF_KEY='kakeibo.prefs', CACHE_KEY='kakeibo.cache.v3';   // v3 = 多了收據網址 rc / id；版本號擋舊格式
+try{ localStorage.removeItem('kakeibo.cache'); localStorage.removeItem('kakeibo.cache.v2'); }catch(e){}
+function loadPrefs(){ try{ const p=JSON.parse(localStorage.getItem(PREF_KEY)||'{}');
+  ['exclude','splitView','sort','listView'].forEach(k=>{ if(p[k]!=null) S[k]=p[k]; });
+  if(!SORTS.some(s=>s[0]===S.sort)) S.sort='date-desc';
+  if(!['list','photo'].includes(S.listView)) S.listView='list'; }catch(e){} }
+function savePrefs(){ try{ localStorage.setItem(PREF_KEY,JSON.stringify({exclude:S.exclude,splitView:S.splitView,sort:S.sort,listView:S.listView})); }catch(e){} }
 function loadCache(){ try{ const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null');
   if(c&&Array.isArray(c.tx)&&c.tx.length){ S.tx=c.tx; S.people=derivePeople(c.tx); S.months=deriveMonths(c.tx); S.lastSync=c.t?new Date(c.t):null; S.loading=false; return true; } }catch(e){} return false; }
 function saveCache(){ try{ localStorage.setItem(CACHE_KEY,JSON.stringify({t:S.lastSync?S.lastSync.getTime():Date.now(),tx:S.tx})); }catch(e){} }
 
 /* ---------- helpers ---------- */
-function ic(n,cls){ return `<span class="ms${cls?' '+cls:''}">${n}</span>`; }
-function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function ic(n,cls){ return `<span class="ms${cls?' '+cls:''}" aria-hidden="true">${n}</span>`; }
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function personBadge(p,i,lg){
   let style;
   if(i===1) style='background:#fff;color:#163300;box-shadow:0 1px 3px rgba(20,21,15,.16)';   // 乖：白底＋淡陰影（無邊框）
@@ -51,9 +53,14 @@ function pct(a,b){ return b?(a/b*100):0; }
 function compact(n){ n=Math.abs(n); if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1)+'M'; if(n>=1e3) return Math.round(n/1e3)+'k'; return ''+Math.round(n); }
 function mLabel(ym){ if(!ym) return ''; const [y,m]=ym.split('-'); const multiYear=S.months.length>0&&new Set(S.months.map(x=>x.slice(0,4))).size>1; return multiYear?`${y.slice(2)}年${+m}月`:`${+m}月`; } /* 跨年資料自動帶年份 */
 function mLabelFull(ym){ if(!ym) return ''; const [y,m]=ym.split('-'); return `${y} 年 ${+m} 月`; }
+function dayLabel(dt){ const w='日一二三四五六'[new Date(dt.y,dt.m-1,dt.d).getDay()]; return `${dt.y!==new Date().getFullYear()?dt.y+' 年 ':''}${dt.m} 月 ${dt.d} 日 · 週${w}`; }
 function destroyCharts(){ S.charts.forEach(c=>{try{c.destroy()}catch(e){}}); S.charts=[]; }
-function moneyTooltip(totalRef){ return {callbacks:{label(ctx){const v=ctx.parsed.y!=null?ctx.parsed.y:ctx.parsed;const tot=typeof totalRef==='function'?totalRef():totalRef;const p=tot?` · ${(v/tot*100).toFixed(1)}%`:'';const nm=ctx.label?ctx.label+': ':'';return `${nm}${fmtY(v)}${p}`;}}}; }
+/* 圖表第一次畫時 Inter 可能還沒載完 → 軸標籤寬度量錯被切；字型好了再重排一次 */
+function redrawAfterFonts(ch){ if(document.fonts&&document.fonts.status!=='loaded') document.fonts.ready.then(()=>{ try{ if(ch.canvas) ch.update('none'); }catch(e){} }); }
 function setProgress(on){ const p=document.getElementById('progress'); if(p) p.classList.toggle('on',on); const rb=document.getElementById('refreshBtn'); if(rb) rb.classList.toggle('loading',on); }
+/* 收據縮圖：bot 另存 320px 小圖在 t/<同路徑>；沒有就退回原圖 */
+function thumbOf(u){ return u.replace(/^(https:\/\/storage\.googleapis\.com\/[^/]+\/)/,'$1t/'); }
+function thumbErr(img){ if(img.dataset.full&&img.getAttribute('src')!==img.dataset.full) img.src=img.dataset.full; else { img.onerror=null; const b=img.closest('.thumb,.rc'); if(b) b.classList.add('err'); } }
 /* count-up target：<span data-cnt="123" data-cur>¥123</span>（data-cur = 帶 ¥ 前綴） */
 function cnt(n,withCur){ const v=Math.round(n); return withCur?`<span class="num" data-cnt="${v}" data-cur>${fmtY(v)}</span>`:`<span class="num" data-cnt="${v}">${fmt(v)}</span>`; }
 function runCountUp(){
@@ -73,7 +80,8 @@ function syncHeadH(){ const tb=document.querySelector('.topbar'); if(tb) documen
 async function boot(){
   loadPrefs();
   S.tab=tabFromHash();
-  buildNav(); bindGlobal(); bindSwipe();
+  const old=location.hash.match(/^#\/([a-z]+)/); if(old&&TAB_ALIAS[old[1]]) history.replaceState(null,'','#/'+S.tab);   // 舊網址改寫成新分頁
+  buildNav(); bindGlobal(); bindSwipe(); bindDetail();
   syncHeadH();
   let rT; addEventListener('resize',()=>{clearTimeout(rT);rT=setTimeout(syncHeadH,150);});
   // 回到 App/分頁時，資料超過 2 分鐘就靜默更新（背景分頁不浪費請求）
@@ -82,7 +90,7 @@ async function boot(){
   else await loadData(true);
   setInterval(()=>loadData(false),5*60*1000);
 }
-function dataSig(){ let s=0; for(const t of S.tx) s+=t.amt; return S.tx.length+'|'+Math.round(s); }
+function dataSig(){ let s=0; for(const t of S.tx) s+=t.amt; return S.tx.length+'|'+Math.round(s)+'|'+S.tx.filter(t=>t.rc).length; }
 async function loadData(initial){
   setProgress(true);
   if(initial){ S.loading=true; renderView(); }
@@ -94,18 +102,18 @@ async function loadData(initial){
   }catch(e){ S.error=e.message||String(e); console.error(e); }
   finally{
     S.loading=false;
-    if(initial||dataSig()!==before){ buildPeriod(); buildNav(); renderView(); }  // 資料沒變就不重渲染（不打斷動畫、不閃爍）
+    if(initial||dataSig()!==before){ closeDetail(); buildPeriod(); buildNav(); renderView(); }  // 資料沒變就不重渲染（不打斷動畫、不閃爍）；有變先關詳情（id 會重排）
     renderSync();
     setTimeout(()=>setProgress(false),550);
   }
 }
 function renderSync(){
   const el=document.getElementById('syncInfo'); if(!el) return;
-  if(S.error&&S.tx.length){ el.innerHTML=`${ic('cloud_off')} 離線 · 顯示上次資料 · <a href="${CONFIG.sheetUrl}" target="_blank">原始表</a>`; return; }
-  if(S.error){ el.innerHTML=`${ic('cloud_off')} 讀取失敗 · <a href="${CONFIG.sheetUrl}" target="_blank">開啟試算表</a>`; return; }
+  if(S.error&&S.tx.length){ el.innerHTML=`${ic('cloud_off')} 離線 · 顯示上次資料 · <a href="${CONFIG.sheetUrl}" target="_blank" rel="noopener">原始表</a>`; return; }
+  if(S.error){ el.innerHTML=`${ic('cloud_off')} 讀取失敗 · <a href="${CONFIG.sheetUrl}" target="_blank" rel="noopener">開啟試算表</a>`; return; }
   if(!S.lastSync){ el.textContent=''; return; }
   const t=S.lastSync.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
-  el.innerHTML=`${ic('cloud_done')} 已同步 ${t} · <a href="${CONFIG.sheetUrl}" target="_blank">原始表</a>`;
+  el.innerHTML=`${ic('cloud_done')} 已同步 ${t} · <a href="${CONFIG.sheetUrl}" target="_blank" rel="noopener">原始表</a>`;
 }
 
 /* ---------- controls + nav + routing ---------- */
@@ -115,6 +123,7 @@ function buildPeriod(){
   for(const m of S.months) h+=`<button class="chip ${S.period===m?'active':''}" data-period="${m}" aria-pressed="${S.period===m}">${mLabel(m)}</button>`;
   w.innerHTML=h;
   w.querySelectorAll('[data-period]').forEach(b=>b.onclick=()=>{S.period=b.dataset.period;buildPeriod();renderView();});
+  const a=w.querySelector('.chip.active'); if(a&&w.scrollWidth>w.clientWidth) w.scrollLeft=Math.max(0,a.offsetLeft-w.clientWidth/2+a.offsetWidth/2);   // 選中的月份捲進畫面
   const ex=document.getElementById('excludeChip');
   ex.classList.toggle('on',S.exclude);
   ex.setAttribute('aria-pressed',S.exclude?'true':'false');   // 開關狀態播報給螢幕閱讀器
@@ -134,12 +143,22 @@ function bindGlobal(){
   window.addEventListener('hashchange',()=>{ const t=tabFromHash(); if(t!==S.tab){ S.tab=t; window.scrollTo({top:0}); buildNav(); renderView();
     const v=document.getElementById('view'); if(v) v.focus({preventScroll:true});   // 切頁後焦點移到主內容（螢幕閱讀器/鍵盤）
   } });
+  // 可點的卡片／分類列：data-go="分頁"、data-catgo="分類"（鍵盤 Enter/Space 同點擊）
+  const v=document.getElementById('view');
+  v.addEventListener('click',e=>{
+    const g=e.target.closest('[data-go]'); if(g){ go(g.dataset.go); return; }
+    const c=e.target.closest('[data-catgo]'); if(c) showCategory(c.dataset.catgo);
+  });
+  v.addEventListener('keydown',e=>{
+    if(e.key!=='Enter'&&e.key!==' ') return;
+    if(e.target.matches('[data-go],[data-catgo]')){ e.preventDefault(); e.target.click(); }
+  });
 }
-function tabFromHash(){ const m=location.hash.match(/^#\/([a-z]+)/); return (m&&TABS.some(t=>t.id===m[1]))?m[1]:'overview'; }
+function tabFromHash(){ const m=location.hash.match(/^#\/([a-z]+)/); const id=m&&(TAB_ALIAS[m[1]]||m[1]); return (id&&TABS.some(t=>t.id===id))?id:'overview'; }
 /* 手機左右滑切換分頁（避開可橫向捲動的元件） */
 function bindSwipe(){
   const el=document.querySelector('main'); if(!el) return; let st=null;
-  el.addEventListener('touchstart',e=>{ const t=e.target.closest('.filters,.period-scroll,.month-pick,.chart-scroll,.seg,canvas,input,.search,.hm'); st=t?null:{x:e.touches[0].clientX,y:e.touches[0].clientY}; },{passive:true});
+  el.addEventListener('touchstart',e=>{ const t=e.target.closest('.filters,.period-scroll,.chart-scroll,.seg,canvas,input,.search'); st=t?null:{x:e.touches[0].clientX,y:e.touches[0].clientY}; },{passive:true});
   el.addEventListener('touchend',e=>{ if(!st) return; const dx=e.changedTouches[0].clientX-st.x, dy=e.changedTouches[0].clientY-st.y; st=null;
     if(Math.abs(dx)>70&&Math.abs(dx)>2.5*Math.abs(dy)){ const i=TABS.findIndex(t=>t.id===S.tab); const n=dx<0?i+1:i-1; if(n>=0&&n<TABS.length) go(TABS[n].id); } },{passive:true});
 }
@@ -153,9 +172,7 @@ function renderView(){
   if(S.error&&!S.tx.length){ v.innerHTML=errorState(); return; }
   const work=applyFilters(S.tx,{period:S.period,exclude:S.exclude});
   const c=compute(work,S.people);
-  const allWork=applyFilters(S.tx,{period:'all',exclude:S.exclude});
-  const cAll=compute(allWork,S.people);
-  const r=({overview:viewOverview,settle:viewSettle,category:viewCategory,split:viewSplit,monthly:viewMonthly,list:viewList})[S.tab](c,work,cAll,allWork);
+  const r=({overview:viewOverview,settle:viewSettle,list:viewList})[S.tab](c,work);
   const [html,after]=Array.isArray(r)?r:[r,()=>{}];
   const key=S.tab+'|'+S.period+'|'+S.exclude+'|'+S.splitView;
   const animate=key!==lastAnimKey; lastAnimKey=key;   // 背景更新不重播動畫
@@ -193,7 +210,7 @@ function deltaBadge(d){
   if(d==null) return '';
   const up=d>0.5,down=d<-0.5,cls=up?'up':(down?'down':'flat');
   const icn=up?'trending_up':(down?'trending_down':'trending_flat');
-  return `<span class="delta ${cls}">${ic(icn)}${Math.abs(d).toFixed(0)}%</span>`;
+  return `<span class="delta ${cls}" aria-label="比上月${up?'多':down?'少':'持平'} ${Math.abs(d).toFixed(0)}%">${ic(icn)}${Math.abs(d).toFixed(0)}%</span>`;
 }
 /* 每月固定/變動拆分（堆疊圖用） */
 function monthFixVar(allWork,months){
@@ -210,40 +227,27 @@ function cumVar(ym,limitDays){
   let run=0; const out=arr.map(x=>run+=x);
   return limitDays?out.slice(0,limitDays):out;
 }
-/* 近 14 天變動花費 sparkline（hero 裝飾） */
-function heroSpark(){
-  const FIX=CONFIG.fixedCats, by={}; let maxD=null;
-  for(const t of S.tx){ if(!t.date||FIX.includes(t.cat)) continue; by[t.date.iso]=(by[t.date.iso]||0)+t.amt; if(!maxD||t.date.sort>maxD.sort) maxD=t.date; }
-  if(!maxD) return '';
-  const days=[]; const base=new Date(maxD.y,maxD.m-1,maxD.d);
-  for(let i=13;i>=0;i--){ const d=new Date(base); d.setDate(base.getDate()-i);
-    days.push(by[`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`]||0); }
-  const mx=Math.max(...days,1), h=30, bw=6, gap=3, w=14*(bw+gap)-gap;
-  const bars=days.map((v,i)=>{ const bh=Math.max(3,Math.round(v/mx*h));
-    return `<rect x="${i*(bw+gap)}" y="${h-bh}" width="${bw}" height="${bh}" rx="2" fill="rgba(159,232,112,${v?.95:.25})"/>`; }).join('');
-  return `<div class="spark-wrap"><svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">${bars}</svg><span>近 14 天變動</span></div>`;
-}
 
 /* =========================================================================
-   Overview
+   總覽 — 一眼看完，細節點進去看
    ========================================================================= */
-function viewOverview(c,work,cAll){
+function viewOverview(c,work){
   const st=c.settlements[0];
-  const settle=st
-    ? `<div class="metric" style="cursor:pointer" onclick="go('settle')">
-         <div class="label">${ic('swap_horiz')} 目前結算</div>
-         <div class="value">${cnt(st.amount,true)}</div>
-         <div class="foot" style="display:flex;align-items:center;gap:7px">${personBadge(st.from,c.people.indexOf(st.from))}${ic('arrow_forward')}${personBadge(st.to,c.people.indexOf(st.to))}</div>
-       </div>`
-    : `<div class="metric"><div class="label">${ic('swap_horiz')} 目前結算</div><div class="value" style="color:var(--down);display:flex;align-items:center;gap:8px">${ic('check_circle','fill')} 已結清</div></div>`;
+  const settleCard=st
+    ? `<div class="card green tap" data-go="settle" role="link" tabindex="0" aria-label="結算：${esc(st.from)} 要還給 ${esc(st.to)} ${fmtY(st.amount)}">
+        <div class="metric">
+          <div class="label">${ic('swap_horiz')} 結算</div>
+          <div class="value">${cnt(st.amount,true)}</div>
+          <div class="flow-mini">${personBadge(st.from,c.people.indexOf(st.from))}${ic('arrow_forward')}${personBadge(st.to,c.people.indexOf(st.to))}</div>
+        </div></div>`
+    : `<div class="card green"><div class="metric"><div class="label">${ic('swap_horiz')} 結算</div><div class="value settled">${ic('check_circle','fill')} 已結清</div></div></div>`;
 
   const p=pace();
-  const paceCard=p?`<div class="metric">
-      <div class="label">${ic('calendar_month')} ${mLabel(p.fm)}${p.current?` · ${p.days}/${p.dim} 天`:''} ${p.current&&p.varDelta!=null?deltaBadge(p.varDelta):''}</div>
+  const paceCard=p?`<div class="card"><div class="metric">
+      <div class="label">${ic('calendar_month')} ${mLabel(p.fm)}${p.current?` · 第 ${p.days} 天`:''}${p.current&&p.varDelta!=null?deltaBadge(p.varDelta):''}</div>
       <div class="value">${cnt(p.total,true)}</div>
-      <div class="foot">變動 ${fmtY(p.current?p.varProj:p.vari)}${p.current?'（估）':''}${p.prevVar!=null?` · 上月變動 ${fmtY(p.prevVar)}`:''}</div>
-      <div class="foot" style="font-size:11.5px">固定 ${fmtY(p.fixed)}${p.one>0?` ＋ 一次性 ${fmtY(p.one)}`:''}（不計入比較）</div>
-    </div>`:'';
+      <div class="foot">${p.current?'變動估':'變動'} ${fmtY(p.current?p.varProj:p.vari)}${p.prevVar!=null?` · 上月 ${fmtY(p.prevVar)}`:''}</div>
+    </div></div>`:'';
 
   // 變動累計曲線：本月 vs 上月（一眼看配速）
   const lineCard=(p&&p.fm)?`
@@ -255,11 +259,11 @@ function viewOverview(c,work,cAll){
 
   const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const maxCat=cats.length?cats[0][1]:1;
-  const catRows=cats.map(([n,a])=>`<div class="row"><div class="ico">${ic(catIcon(n))}</div>
+  const catRows=cats.map(([n,a])=>`<div class="row tap" data-catgo="${esc(n)}" role="link" tabindex="0" aria-label="${esc(n)} ${fmtY(a)}，看這類明細"><div class="ico sm">${ic(catIcon(n))}</div>
     <div class="main"><div class="l1"><span class="name">${esc(n)}</span><span class="amt">${fmtY(a)}</span></div>
     <div class="bar"><i style="width:${pct(a,maxCat).toFixed(1)}%"></i></div></div></div>`).join('')||emptyRow();
 
-  const recent=work.slice().reverse().slice(0,5).map(txRow).join('')||emptyRow();
+  const recent=work.slice().reverse().slice(0,5).map(t=>txRow(t,true)).join('')||emptyRow();   // 注意：不可 .map(txRow)，index 會被當成 showDate
   const heroLabel=S.period==='all'?'全部支出':mLabelFull(S.period)+' 支出';
 
   const html=`
@@ -270,27 +274,19 @@ function viewOverview(c,work,cAll){
         <div><div class="l">共同</div><div class="v num">${fmtY(c.totalCommon)}</div></div>
         <div><div class="l">個人</div><div class="v num">${fmtY(c.totalPersonal)}</div></div>
         <div><div class="l">筆數</div><div class="v num">${c.count}</div></div>
-        ${heroSpark()}
       </div>
     </div>
-    <div class="grid g-2">
-      <div class="card green">${settle}</div>
-      <div class="card">${paceCard}</div>
-    </div>
+    <div class="grid g-2">${settleCard}${paceCard}</div>
     ${lineCard}
     <div class="grid g-2">
       <div class="card">
-        <div class="card-head"><h3>${ic('donut_small')} 主要分類</h3><a class="link" onclick="go('category')">全部${ic('chevron_right')}</a></div>
+        <div class="card-head"><h3>${ic('donut_small')} 分類</h3><a class="link" href="#/list">明細${ic('chevron_right')}</a></div>
         <div class="rows">${catRows}</div>
       </div>
       <div class="card">
-        <div class="card-head"><h3>${ic('lightbulb')} 洞察</h3></div>
-        ${insights(c,work)}
+        <div class="card-head"><h3>${ic('schedule')} 最近</h3><a class="link" href="#/list">全部${ic('chevron_right')}</a></div>
+        <div class="rows-tx" data-seq="recent">${recent}</div>
       </div>
-    </div>
-    <div class="card">
-      <div class="card-head"><h3>${ic('receipt_long')} 最近交易</h3><a class="link" onclick="go('list')">全部${ic('chevron_right')}</a></div>
-      <div class="rows-tx">${recent}</div>
     </div>`;
   const after=()=>{
     if(!p||!p.fm) return;
@@ -302,50 +298,25 @@ function viewOverview(c,work,cAll){
     const ds=[];
     if(prv.length) ds.push({label:mLabel(p.prevYm),data:prv,borderColor:'#c2c6bc',borderDash:[5,4],borderWidth:2,pointRadius:0,pointHoverRadius:3,tension:.25,fill:false});
     ds.push({label:mLabel(p.fm),data:cur,borderColor:'#163300',backgroundColor:'rgba(159,232,112,.16)',borderWidth:2.4,pointRadius:0,pointHoverRadius:3,tension:.25,fill:true});
-    S.charts.push(new Chart(ctx,{type:'line',
+    const ch=new Chart(ctx,{type:'line',
       data:{labels,datasets:ds},
-      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},layout:{padding:{left:4}},
         scales:{y:{beginAtZero:true,ticks:{callback:v=>'¥'+compact(v),maxTicksLimit:5},grid:{color:'#eceee9'},border:{display:false}},
                 x:{ticks:{maxTicksLimit:8},grid:{display:false},border:{display:false}}},
-        plugins:{legend:{display:false},tooltip:{callbacks:{title:i=>`${i[0].label} 日`,label:c2=>`${c2.dataset.label}: ${fmtY(c2.parsed.y)}`}}}}}));
+        plugins:{legend:{display:false},tooltip:{callbacks:{title:i=>`${i[0].label} 日`,label:c2=>`${c2.dataset.label}: ${fmtY(c2.parsed.y)}`}}}}});
+    S.charts.push(ch); redrawAfterFonts(ch);
   };
   return [html,after];
 }
-function insights(c,work){
-  const out=[];
-  const dated=(work||[]).filter(t=>t.date).slice().sort((a,b)=>b.date.sort-a.date.sort);
-  const last=dated[0];
-  if(last) out.push([catIcon(last.cat),`最近一筆 <b>${esc(last.desc||last.cat)}</b> · ${fmtY(last.amt)} · ${last.date.iso.slice(5)}`]);
-  if(last){
-    const d=new Date(last.date.y,last.date.m-1,last.date.d); d.setDate(d.getDate()-6);
-    const lo=d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();
-    const r7=dated.filter(t=>t.date.sort>=lo), sum=r7.reduce((a,b)=>a+b.amt,0);
-    out.push(['date_range',`近 7 天 <b>${fmtY(sum)}</b> · ${r7.length} 筆`]);
-  }
-  const cntMap={}; (work||[]).forEach(t=>cntMap[t.cat]=(cntMap[t.cat]||0)+1);
-  const tf=Object.entries(cntMap).sort((a,b)=>b[1]-a[1])[0];
-  if(tf) out.push(['repeat',`最常買 <b>${esc(tf[0])}</b> · ${tf[1]} 筆`]);
-  const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]);
-  if(cats.length){ const [n,a]=cats[0]; out.push([catIcon(n),`最大開銷 <b>${esc(n)}</b> · ${fmtY(a)} · ${pct(a,c.total).toFixed(0)}%`]); }
-  if(c.biggest) out.push(['local_fire_department',`最大單筆 <b>${esc(c.biggest.desc||c.biggest.cat)}</b> · ${fmtY(c.biggest.amt)}`]);
-  const cash=c.byMethod['現金']||0; if(c.total) out.push(['account_balance_wallet',`現金 <b>${pct(cash,c.total).toFixed(0)}%</b> · 刷卡 <b>${(100-pct(cash,c.total)).toFixed(0)}%</b>`]);
-  if(c.people.length===2){ const [a,b]=c.people; const d=(c.commonByPerson[a]||0)-(c.commonByPerson[b]||0); if(Math.abs(d)>1){ const more=d>0?a:b,less=d>0?b:a; out.push(['balance',`<b>${esc(more)}</b> 比 <b>${esc(less)}</b> 多墊 <b>${fmtY(Math.abs(d))}</b>`]); } }
-  return out.slice(0,6).map(([i,t])=>`<div class="insight"><div class="ico sm">${ic(i)}</div><div class="tx2">${t}</div></div>`).join('');
-}
 
 /* =========================================================================
-   Settlement
+   結算（含原「分攤」）
    ========================================================================= */
 function viewSettle(c){
-  const incl=compute(applyFilters(S.tx,{period:S.period,exclude:false}),S.people);
-  const excl=compute(applyFilters(S.tx,{period:S.period,exclude:true}),S.people);
-  const active=S.exclude?excl:incl;
-  const st=active.settlements[0];
-
-  let hero;
-  if(!st){ hero=`<div class="settle zero">${ic('check_circle','fill')}<div class="cap" style="margin-top:8px">這段期間已結清</div></div>`; }
-  else{
-    hero=`<div class="settle">
+  const st=c.settlements[0];
+  const hero=!st
+    ? `<div class="settle zero">${ic('check_circle','fill')}<div class="cap" style="margin-top:8px">這段期間已結清</div></div>`
+    : `<div class="settle">
       <div class="flow">
         <div class="who lg">${esc(st.from[0])}</div>
         <div class="ar">${ic('arrow_forward')}</div>
@@ -354,87 +325,27 @@ function viewSettle(c){
       <div class="amt num"><span class="cur">¥</span>${cnt(st.amount)}</div>
       <div class="cap"><b>${esc(st.from)}</b> 要還給 <b>${esc(st.to)}</b></div>
     </div>`;
-  }
 
-  const maxC=Math.max(...active.people.map(p=>active.commonByPerson[p]||0),1);
-  const bars=active.people.map((p,i)=>{
-    const v=active.commonByPerson[p]||0,diff=v-active.fairShare;
+  // 共同支出誰墊得多（結算的依據）
+  const maxC=Math.max(...c.people.map(p=>c.commonByPerson[p]||0),1);
+  const bars=c.people.map((p,i)=>{
+    const v=c.commonByPerson[p]||0,diff=v-c.fairShare;
     return `<div class="ctrack"><div class="top"><b>${personTag(p,i)}</b><span class="num">${fmtY(v)}</span></div>
       <div class="line"><i style="width:${pct(v,maxC)}%;background:${PERSON_CHART[i]}"></i></div>
-      <div class="foot" style="margin-top:6px;font-size:12px;color:var(--mute)">${diff>=0?'多墊':'少墊'} ${fmtY(Math.abs(diff))}</div></div>`;
+      <div class="foot">${diff>=0?'多墊':'少墊'} ${fmtY(Math.abs(diff))}</div></div>`;
   }).join('');
 
-  const personSpend=active.people.map((p,i)=>{
-    const cats=Object.entries(active.payerCat[p]||{}).sort((a,b)=>b[1]-a[1]).slice(0,7);
-    const mx=cats.length?cats[0][1]:1;
-    const rows=cats.map(([n,a])=>`<div class="row"><div class="ico sm">${ic(catIcon(n))}</div>
+  // 每個人花在哪：全部 / 共同 / 個人
+  const mode=S.splitView||'all', showC=mode!=='personal', showP=mode!=='common';
+  // 每段只列前 5 類，其餘合併一列（避免一個人十幾列、頁面過長）
+  const mkRows=(entries,col)=>{ if(!entries.length) return emptyRow();
+    const mx=entries[0][1], top=entries.slice(0,5), rest=entries.slice(5);
+    const row=(n,a,icn,cls)=>`<div class="row${cls?' '+cls:''}"><div class="ico sm">${ic(icn)}</div>
       <div class="main"><div class="l1"><span class="name">${esc(n)}</span><span class="amt">${fmtY(a)}</span></div>
-      <div class="bar thin"><i style="width:${pct(a,mx).toFixed(1)}%;background:${PERSON_CHART[i]}"></i></div></div></div>`).join('')||emptyRow();
-    return `<div class="card">
-      <div class="card-head"><h3>${personTag(p,i)} 花在哪</h3><span class="num" style="font-weight:700">${fmtY(active.paidByPerson[p]||0)}</span></div>
-      <div class="rows">${rows}</div></div>`;
-  }).join('');
-
-  const html=`
-    <div class="page-head"><h2>結算</h2><div class="sub">${periodName()}${S.exclude?' · 排除大筆':''}</div></div>
-    <div class="card green">${hero}</div>
-    <div class="card">
-      <div class="card-head"><h3>${ic('account_balance_wallet')} 共同支出墊付</h3><span class="foot" style="font-size:12px;color:var(--mute)">每人應分攤 ${fmtY(active.fairShare)}</span></div>
-      <div class="contrib">${bars}</div>
-    </div>
-    <div class="grid g-2">${personSpend}</div>`;
-  return [html,()=>{}];
-}
-
-/* =========================================================================
-   Category（特定月份時顯示 vs 上月環比）
-   ========================================================================= */
-function viewCategory(c){
-  const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]);
-  if(!cats.length) return [`<div class="page-head"><h2>分類</h2></div><div class="card"><div class="empty">沒有資料</div></div>`];
-  const labels=cats.map(x=>x[0]), data=cats.map(x=>x[1]), colors=chartColors(cats.length);
-  // 環比：選了特定月份且有上月 → 每類 vs 上月
-  let prevCat=null, prevYmLbl='';
-  if(S.period!=='all'){
-    const idx=S.months.indexOf(S.period), prevYm=idx>0?S.months[idx-1]:null;
-    if(prevYm){ prevCat=compute(applyFilters(S.tx,{period:prevYm,exclude:S.exclude}),S.people).byCat; prevYmLbl=mLabel(prevYm); }
-  }
-  const legend=cats.map(([n,a],i)=>`<div class="lg"><span class="sw" style="background:${colors[i]}"></span><span class="nm">${esc(n)}</span><span class="vl num">${fmtY(a)}</span><span class="pc">${pct(a,c.total).toFixed(0)}%</span></div>`).join('');
-  const mx=cats[0][1];
-  const rank=cats.map(([n,a],i)=>{
-    const pv=prevCat?prevCat[n]:null;
-    const chip=(pv>0)?deltaBadge((a-pv)/pv*100):'';
-    return `<div class="row"><div class="ico">${ic(catIcon(n))}</div>
-    <div class="main"><div class="l1"><span class="name">${esc(n)}</span><span class="amt">${fmtY(a)}</span></div>
-    <div class="sub"><span>${pct(a,c.total).toFixed(1)}%</span><span>${c.catCount[n]} 筆</span>${chip?`<span style="margin-left:auto">${chip}</span>`:''}</div>
-    <div class="bar"><i style="width:${pct(a,mx).toFixed(1)}%;background:${colors[i]}"></i></div></div></div>`;
-  }).join('');
-  const html=`
-    <div class="page-head"><h2>分類</h2><div class="sub">${periodName()} · ${fmtY(c.total)}${prevCat?` · 環比 vs ${prevYmLbl}`:''}</div></div>
-    <div class="grid g-2">
-      <div class="card">
-        <div class="chart donut" role="img" aria-label="分類支出佔比圓環圖，總額 ${fmtY(c.total)}"><canvas id="catDonut"></canvas><div class="dc"><div><div class="l">${periodName()}</div><div class="v num">${fmtY(c.total)}</div></div></div></div>
-        <div class="legend">${legend}</div>
-      </div>
-      <div class="card"><div class="card-head"><h3>${ic('leaderboard')} 排行</h3></div><div class="rows">${rank}</div></div>
-    </div>`;
-  const after=()=>{ const ctx=document.getElementById('catDonut'); if(ctx) S.charts.push(new Chart(ctx,{type:'doughnut',
-    data:{labels,datasets:[{data,backgroundColor:colors,borderColor:'#fff',borderWidth:2,hoverOffset:6}]},
-    options:{cutout:'72%',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:moneyTooltip(()=>c.total)}}})); };
-  return [html,after];
-}
-
-/* =========================================================================
-   Split (共同 / 個人)
-   ========================================================================= */
-function viewSplit(c){
-  const people=c.people;
-  const mode=S.splitView||'all';            // all | common | personal
-  const showC=mode!=='personal', showP=mode!=='common';
-  const mkRows=(entries,col)=>{ const mx=entries.length?entries[0][1]:1; return entries.map(([n,a])=>`<div class="row"><div class="ico sm">${ic(catIcon(n))}</div>
-      <div class="main"><div class="l1"><span class="name">${esc(n)}</span><span class="amt">${fmtY(a)}</span></div>
-      <div class="bar thin"><i style="width:${pct(a,mx).toFixed(1)}%;background:${col}"></i></div></div></div>`).join('')||emptyRow(); };
-  const personCards=people.map((p,i)=>{
+      <div class="bar thin"><i style="width:${pct(a,mx).toFixed(1)}%;background:${col}"></i></div></div></div>`;
+    return top.map(([n,a])=>row(n,a,catIcon(n))).join('')
+      +(rest.length?row(`其他 ${rest.length} 類`,rest.reduce((s,x)=>s+x[1],0),'more_horiz','more'):''); };
+  const personCards=c.people.map((p,i)=>{
     const col=PERSON_CHART[i];
     const common=Object.entries(c.commonCatByPerson[p]||{}).sort((a,b)=>b[1]-a[1]);
     const personal=Object.entries(c.catByPerson[p]||{}).sort((a,b)=>b[1]-a[1]);
@@ -446,187 +357,156 @@ function viewSplit(c){
       <div class="card-head"><h3>${personTag(p,i)}</h3><span class="num" style="font-weight:700">${fmtY((showC?cTot:0)+(showP?pTot:0))}</span></div>
       ${inner}</div>`;
   }).join('');
-  const maxC=Math.max(...people.map(p=>c.commonByPerson[p]||0),1);
-  const commonBars=people.map((p,i)=>`<div class="ctrack"><div class="top"><b>${personTag(p,i)}</b><span class="num">${fmtY(c.commonByPerson[p]||0)}</span></div><div class="line"><i style="width:${pct(c.commonByPerson[p]||0,maxC)}%;background:${PERSON_CHART[i]}"></i></div></div>`).join('');
-  const seg=`<div class="seg">${[['all','全部'],['common','共同'],['personal','個人']].map(([k,l])=>`<button class="${mode===k?'active':''}" onclick="setSplitView('${k}')">${l}</button>`).join('')}</div>`;
-  const cCard=`<div class="card green"><div class="metric"><div class="label" style="color:var(--forest-2)">${ic('group')} 共同支出</div><div class="value">${cnt(c.totalCommon,true)}</div><div class="foot" style="color:var(--forest-2)">佔 ${pct(c.totalCommon,c.total).toFixed(0)}%</div></div></div>`;
-  const pCard=`<div class="card dark"><div class="metric"><div class="label" style="color:rgba(255,255,255,.65)">${ic('person')} 個人支出</div><div class="value">${cnt(c.totalPersonal,true)}</div><div class="foot" style="color:rgba(255,255,255,.6)">佔 ${pct(c.totalPersonal,c.total).toFixed(0)}%</div></div></div>`;
-  const barsCard=`<div class="card"><div class="card-head"><h3>${ic('account_balance_wallet')} 共同墊付</h3><span class="foot" style="font-size:12px;color:var(--mute)">「一起」付已平分</span></div><div class="contrib">${commonBars}</div></div>`;
-  const html=`
-    <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap"><div><h2>共同 / 個人</h2><div class="sub">${periodName()}${S.exclude?' · 排除大筆':''}</div></div>${seg}</div>
-    <div class="grid ${showC&&showP?'g-2':''}">${showC?cCard:''}${showP?pCard:''}</div>
-    ${mode==='all'
-      ? `<div class="grid g-2"><div class="card"><div class="chart donut" role="img" aria-label="共同與個人支出佔比圓環圖，共同佔 ${pct(c.totalCommon,c.total).toFixed(0)}%"><canvas id="splitDonut"></canvas><div class="dc"><div><div class="l">共同佔</div><div class="v num">${pct(c.totalCommon,c.total).toFixed(0)}%</div></div></div></div></div>${barsCard}</div>`
-      : (showC?barsCard:'')}
-    <div class="grid g-2">${personCards}</div>`;
-  const after=()=>{ if(mode!=='all') return; const ctx=document.getElementById('splitDonut'); if(ctx) S.charts.push(new Chart(ctx,{type:'doughnut',
-    data:{labels:['共同','個人'],datasets:[{data:[c.totalCommon,c.totalPersonal],backgroundColor:['#9fe870','#163300'],borderColor:'#fff',borderWidth:2,hoverOffset:6}]},
-    options:{cutout:'72%',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:moneyTooltip(()=>c.total)}}})); };
-  return [html,after];
-}
+  const seg=`<div class="seg" role="group" aria-label="顯示範圍">${[['all','全部'],['common','共同'],['personal','個人']].map(([k,l])=>`<button class="${mode===k?'active':''}" aria-pressed="${mode===k}" onclick="setSplitView('${k}')">${l}</button>`).join('')}</div>`;
 
-/* =========================================================================
-   Monthly — 固定+變動堆疊 + 月曆熱力圖
-   ========================================================================= */
-function heatmapHtml(fm,fmWork){
-  if(!fm) return '';
-  const dim=monthDays(fm), [y,mo]=fm.split('-').map(Number);
-  const by={}; fmWork.forEach(t=>{ if(t.date) by[t.date.d]=(by[t.date.d]||0)+t.amt; });
-  const first=new Date(y,mo-1,1).getDay();
-  const mx=Math.max(...Object.values(by),1), smx=Math.sqrt(mx);
-  const head=['日','一','二','三','四','五','六'].map(x=>`<div class="hm-h">${x}</div>`).join('');
-  let cells=''; for(let i=0;i<first;i++) cells+='<div class="hm-c empty"></div>';
-  for(let d=1;d<=dim;d++){
-    const v=by[d]||0;
-    const k=v?Math.min(4,Math.max(1,Math.ceil(Math.sqrt(v)/smx*4))):0;
-    cells+=`<div class="hm-c l${k}" title="${fm}-${String(d).padStart(2,'0')}：${v?fmtY(v):'—'}"><span class="d">${d}</span>${v?`<span class="v">${compact(v)}</span>`:''}</div>`;
-  }
-  return `<div class="hm">${head}${cells}</div>`;
-}
-function viewMonthly(c,work,cAll,allWork){
-  const months=S.months.slice(), labels=months.map(mLabel);
-  const fm=focusMonth();
-  const fmWork=applyFilters(S.tx,{period:fm,exclude:S.exclude}), fmC=compute(fmWork,S.people);
-  const p=pace();
-  const fv=monthFixVar(allWork,months);
-  const fmCats=Object.entries(fmC.byCat).sort((a,b)=>b[1]-a[1]);
-  const mx=fmCats.length?fmCats[0][1]:1;
-  const detail=fmCats.map(([n,a])=>`<div class="row"><div class="ico sm">${ic(catIcon(n))}</div>
-    <div class="main"><div class="l1"><span class="name">${esc(n)}</span><span class="amt">${fmtY(a)}</span></div>
-    <div class="bar thin"><i style="width:${pct(a,mx).toFixed(1)}%"></i></div></div></div>`).join('')||emptyRow();
-  const chips=months.map(m=>`<button class="chip ${fm===m?'active':''}" onclick="setPeriod('${m}')">${mLabel(m)}</button>`).join('');
   const html=`
-    <div class="page-head"><h2>月份趨勢</h2><div class="sub">每月固定＋變動${S.exclude?' · 排除大筆':''}</div></div>
+    <div class="page-head"><h2>結算</h2><div class="sub">${periodName()}${S.exclude?' · 排除大筆':''}</div></div>
+    <div class="card green">${hero}</div>
     <div class="card">
-      <div class="card-head"><h3>${ic('bar_chart')} 每月支出</h3>
-        <span class="legend-mini"><i style="background:#163300"></i>固定<i style="background:#9fe870"></i>變動</span></div>
-      <div class="chart-scroll"><div class="chart bars" role="img" aria-label="每月支出堆疊長條圖（固定＋變動）" style="min-width:${Math.max(0,months.length*52)}px"><canvas id="monthBars"></canvas></div></div>
+      <div class="card-head"><h3>${ic('account_balance_wallet')} 共同支出誰墊的</h3><span class="foot">每人應付 ${fmtY(c.fairShare)}</span></div>
+      <div class="contrib">${bars}</div>
     </div>
-    <div class="card">
-      <div class="card-head"><h3>${ic('calendar_month')} ${mLabelFull(fm)} ${p&&p.current&&p.varDelta!=null?deltaBadge(p.varDelta):''}</h3></div>
-      <div class="month-pick">${chips}</div>
-      <div class="metric" style="margin-bottom:6px">
-        <div class="value">${cnt(fmC.total,true)}</div>
-        <div class="foot">${fmC.count} 筆 · 共同 ${fmtY(fmC.totalCommon)} / 個人 ${fmtY(fmC.totalPersonal)}${p&&p.prevTotal!=null&&p.fm===fm?` · 上月 ${fmtY(p.prevTotal)}`:''}${p&&p.current&&p.fm===fm?` · 估整月 ${fmtY(p.projTotal)}`:''}</div>
-      </div>
-      ${heatmapHtml(fm,fmWork)}
-      <div class="rows">${detail}</div>
-    </div>`;
-  const after=()=>{ const ctx=document.getElementById('monthBars'); if(!ctx) return;
-    S.charts.push(new Chart(ctx,{type:'bar',
-      data:{labels,datasets:[
-        {label:'固定',data:fv.map(x=>x.f),backgroundColor:months.map(m=>m===fm?'#163300':'rgba(22,51,0,.4)'),stack:'s',maxBarThickness:56,borderRadius:{topLeft:0,topRight:0,bottomLeft:8,bottomRight:8},borderSkipped:false},
-        {label:'變動',data:fv.map(x=>x.v),backgroundColor:months.map(m=>m===fm?'#9fe870':'rgba(159,232,112,.45)'),stack:'s',maxBarThickness:56,borderRadius:{topLeft:8,topRight:8,bottomLeft:0,bottomRight:0},borderSkipped:false}]},
-      options:{responsive:true,maintainAspectRatio:false,onClick:(e,el)=>{if(el.length)setPeriod(months[el[0].index]);},
-        scales:{y:{stacked:true,beginAtZero:true,ticks:{callback:v=>'¥'+compact(v)},grid:{color:'#eceee9'},border:{display:false}},
-                x:{stacked:true,grid:{display:false},border:{display:false}}},
-        plugins:{legend:{display:false},tooltip:{callbacks:{
-          label:c2=>`${c2.dataset.label}: ${fmtY(c2.parsed.y)}`,
-          footer:items=>'合計 '+fmtY(items.reduce((a,b)=>a+b.parsed.y,0))}}}}}));
-  };
-  return [html,after];
+    <div class="sec-head"><h3>每個人花在哪</h3>${seg}</div>
+    <div class="grid g-2">${personCards}</div>`;
+  return [html,()=>{}];
 }
 
 /* =========================================================================
-   List — sort + filter + search
+   明細（含原「月份」「分類」與收據照片）
    ========================================================================= */
-function viewList(c,work){
-  return [listShell(), mountList];
-}
-function listShell(){
-  const cc=compute(applyFilters(S.tx,{period:S.period,exclude:S.exclude}));
-  const cats=Object.keys(cc.byCat).sort((a,b)=>(cc.catCount[b]||0)-(cc.catCount[a]||0));
-  const noFilter=!S.fKinds.length && !S.fCats.length;
-  const allChip=`<button class="fchip ${noFilter?'active':''}" data-all="1">${ic('apps')}全部</button>`;
-  const kindChips=[['共同','group'],['個人','person']].map(([k,i])=>`<button class="fchip kind ${S.fKinds.includes(k)?'active':''}" data-kind="${k}">${ic(i)}${k}</button>`).join('');
-  const catChips=cats.map(k=>`<button class="fchip ${S.fCats.includes(k)?'active':''}" data-cat="${esc(k)}">${ic(catIcon(k))}${esc(k)}</button>`).join('');
-  const sorts=[['date','日期','event'],['amount','金額','payments'],['cat','類型','category']];
-  const sortBtns=sorts.map(([k,l,i])=>`<button class="${S.sortBy===k?'active':''}" data-sort="${k}">${ic(i)}${l}</button>`).join('');
+function viewList(c){ return [listShell(c), mountList]; }
+function listShell(c){
+  const cats=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]), colors=chartColors(cats.length);
+  const comp=`<div class="pay-bar" role="img" aria-label="分類組成：${esc(cats.slice(0,5).map(([n,a])=>`${n} ${pct(a,c.total).toFixed(0)}%`).join('、'))}">${cats.map(([n,a],i)=>`<i style="width:${pct(a,c.total)}%;background:${colors[i]}" title="${esc(n)} ${fmtY(a)}"></i>`).join('')}</div>`;
+  const catChips=cats.map(([n,a],i)=>`<button class="fchip ${S.fCats.includes(n)?'active':''}" data-cat="${esc(n)}" aria-pressed="${S.fCats.includes(n)}"><span class="dot" style="background:${colors[i]}"></span>${esc(n)}<span class="fa num">¥${compact(a)}</span></button>`).join('');
+  const trend=S.months.length>1?`
+    <div class="card pad-sm">
+      <div class="card-head"><h3>${ic('bar_chart')} 每月</h3><span class="legend-mini"><i style="background:#163300"></i>固定<i style="background:#9fe870"></i>變動</span></div>
+      <div class="chart-scroll" id="monthScroll"><div class="chart bars" role="img" aria-label="每月支出（固定＋變動），點長條切換月份" style="min-width:${S.months.length*40}px"><canvas id="monthBars"></canvas></div></div>
+    </div>`:'';
+  const noFilter=!S.fKinds.length&&!S.fCats.length;
+  const kindChips=`<button class="fchip ${noFilter?'active':''}" data-all="1">全部</button>`
+    +[['共同','group'],['個人','person']].map(([k,i])=>`<button class="fchip ${S.fKinds.includes(k)?'active':''}" data-kind="${k}" aria-pressed="${S.fKinds.includes(k)}">${ic(i)}${k}</button>`).join('');
+  const views=[['list','view_agenda','清單'],['photo','photo_library','收據照片']].map(([k,i,l])=>`<button data-view="${k}" class="${S.listView===k?'active':''}" aria-pressed="${S.listView===k}" aria-label="${l}" title="${l}">${ic(i)}</button>`).join('');
   return `
-    <div class="page-head"><h2>明細</h2></div>
+    <div class="page-head"><h2>明細</h2><div class="sub">${periodName()} · ${fmtY(c.total)}${S.exclude?' · 排除大筆':''}</div></div>
+    ${trend}
+    ${cats.length?`<div class="card pad-sm"><div class="card-head"><h3>${ic('donut_small')} 分類</h3></div>${comp}<div class="filters cats">${catChips}</div></div>`:''}
     <div class="toolbar">
-      <div class="search">${ic('search')}<input id="searchInput" aria-label="搜尋交易（品項、店名、付款人）" placeholder="搜尋品項、店名、付款人" value="${esc(S.search)}"/></div>
-      <div class="sortbar">
-        <span class="lbl">排序</span>
-        <div class="seg">${sortBtns}</div>
-        <button class="iconbtn" id="dirBtn" title="排序方向" aria-label="切換排序方向" style="width:36px;height:36px">${ic(S.sortDir==='desc'?'arrow_downward':'arrow_upward')}</button>
+      <div class="tool-row">
+        <label class="search">${ic('search')}<input id="searchInput" type="search" enterkeyhint="search" aria-label="搜尋店名、品項、付款人" placeholder="搜尋店名、品項" value="${esc(S.search)}"/></label>
+        <div class="seg icon" role="group" aria-label="顯示方式">${views}</div>
       </div>
-      <div class="filters kindrow">${allChip}${kindChips}</div>
-      <div class="filters catrow">${catChips}</div>
+      <div class="tool-row">
+        <div class="filters kinds">${kindChips}</div>
+        <button class="sortbtn" id="sortBtn">${ic('swap_vert')}<span></span></button>
+      </div>
     </div>
     <div id="listBody"></div>`;
 }
-function listRows(){
-  let rows=applyFilters(S.tx,{period:S.period,exclude:S.exclude}).slice();
-  if(S.fKinds.length) rows=rows.filter(t=>S.fKinds.includes(t.kind));
-  if(S.fCats.length) rows=rows.filter(t=>S.fCats.includes(t.cat));
-  if(S.search.trim()){ const q=S.search.trim().toLowerCase(); rows=rows.filter(t=>(t.desc+t.cat+t.payer+t.method).toLowerCase().includes(q)); }
-  const dir=S.sortDir==='desc'?-1:1;
-  rows.sort((a,b)=>{
-    let r=0;
-    if(S.sortBy==='amount') r=a.amt-b.amt;
-    else if(S.sortBy==='cat') r=a.cat.localeCompare(b.cat)|| (a.date?.sort||0)-(b.date?.sort||0);
-    else r=(a.date?.sort||0)-(b.date?.sort||0);
-    return r*dir;
-  });
-  const sum=rows.reduce((a,b)=>a+b.amt,0);
-  let body;
-  if(S.sortBy==='date'){
-    const g={}; for(const t of rows){ const k=t.date?t.date.iso:'—'; (g[k]=g[k]||[]).push(t); }
-    const groups=Object.entries(g).map(([day,ts])=>`<div class="daygroup"><div class="dayhead"><span class="d">${day}</span><span class="t num">${fmtY(ts.reduce((a,b)=>a+b.amt,0))}</span></div>${ts.map(txRow).join('')}</div>`).join('');
-    body=`<div class="card pad-sm">${groups||emptyRow()}</div>`;
-  } else {
-    body=`<div class="card pad-sm">${rows.map(t=>txRow(t,true)).join('')||emptyRow()}</div>`;
-  }
-  return `<div class="sub" style="color:var(--mute);font-size:13px;margin:4px 2px 8px">${rows.length} 筆 · ${fmtY(sum)}</div>${paymentSummary(rows)}${body||`<div class="card"><div class="empty">找不到符合的交易</div></div>`}`;
-}
-const PAY_META={'現金':{ic:'payments',c:'#9fe870'},'信用卡':{ic:'credit_card',c:'#163300'},'SUICA':{ic:'contactless',c:'#74b84b'},'銀行轉帳':{ic:'account_balance',c:'#8a9282'},'轉帳':{ic:'account_balance',c:'#8a9282'},'電子支付':{ic:'qr_code_2',c:'#bfe4a1'}};
-function payMeta(m){ return PAY_META[m]||{ic:'more_horiz',c:'#c2c6bc'}; }
-function paymentSummary(rows){
-  const by={}; let total=0;
-  for(const t of rows){ const m=t.method||'其他'; by[m]=(by[m]||0)+t.amt; total+=t.amt; }
-  if(!total) return '';
-  const order=Object.entries(by).sort((a,b)=>b[1]-a[1]);
-  const segs=order.map(([m,v])=>{ const md=payMeta(m); return `<i style="width:${pct(v,total)}%;background:${md.c}" title="${esc(m)} ${fmtY(v)}"></i>`; }).join('');
-  const list=order.map(([m,v])=>{ const md=payMeta(m); return `<div class="pay-row"><span class="pay-ic" style="color:${md.c}">${ic(md.ic,'fill')}</span><span class="pay-nm">${esc(m)}</span><span class="pay-vl num">${fmtY(v)}</span><span class="pay-pc">${pct(v,total).toFixed(0)}%</span></div>`; }).join('');
-  return `<div class="card pad-sm pay-card">
-    <div class="card-head" style="margin-bottom:10px"><h3>${ic('account_balance_wallet')} 付款方式</h3><span class="num" style="font-weight:700">${fmtY(total)}</span></div>
-    <div class="pay-bar">${segs}</div>
-    <div class="pay-list">${list}</div>
-  </div>`;
-}
 function mountList(){
-  renderListBody();
+  drawMonthBars();
+  refreshListControls();
   const inp=document.getElementById('searchInput');
-  if(inp) inp.oninput=()=>{S.search=inp.value;renderListBody();};
-  document.querySelectorAll('[data-sort]').forEach(b=>b.onclick=()=>{S.sortBy=b.dataset.sort;savePrefs();refreshListControls();});
+  if(inp){ let t; inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ S.search=inp.value; renderListBody(); },120); }; }
+  document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{toggleIn(S.fCats,b.dataset.cat);refreshListControls();});
   const allB=document.querySelector('[data-all]'); if(allB) allB.onclick=()=>{S.fKinds=[];S.fCats=[];refreshListControls();};
   document.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{toggleIn(S.fKinds,b.dataset.kind);refreshListControls();});
-  document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{toggleIn(S.fCats,b.dataset.cat);refreshListControls();});
-  const dir=document.getElementById('dirBtn'); if(dir) dir.onclick=()=>{S.sortDir=S.sortDir==='desc'?'asc':'desc';savePrefs();refreshListControls();};
+  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{S.listView=b.dataset.view;savePrefs();refreshListControls();});
+  const sb=document.getElementById('sortBtn'); if(sb) sb.onclick=()=>{ const i=SORTS.findIndex(s=>s[0]===S.sort); S.sort=SORTS[(i+1)%SORTS.length][0]; savePrefs(); refreshListControls(); };
+}
+function drawMonthBars(){
+  const ctx=document.getElementById('monthBars'); if(!ctx) return;
+  const months=S.months, fm=S.period!=='all'?S.period:null, hi=m=>!fm||m===fm;
+  const fv=monthFixVar(applyFilters(S.tx,{period:'all',exclude:S.exclude}),months);
+  const ch=new Chart(ctx,{type:'bar',
+    data:{labels:months.map(mLabel),datasets:[
+      {label:'固定',data:fv.map(x=>x.f),backgroundColor:months.map(m=>hi(m)?'#163300':'rgba(22,51,0,.22)'),stack:'s',maxBarThickness:44,borderRadius:{topLeft:0,topRight:0,bottomLeft:6,bottomRight:6},borderSkipped:false},
+      {label:'變動',data:fv.map(x=>x.v),backgroundColor:months.map(m=>hi(m)?'#9fe870':'rgba(159,232,112,.35)'),stack:'s',maxBarThickness:44,borderRadius:{topLeft:6,topRight:6,bottomLeft:0,bottomRight:0},borderSkipped:false}]},
+    options:{responsive:true,maintainAspectRatio:false,layout:{padding:{left:4}},
+      onClick:(e,el)=>{ if(el.length){ const m=months[el[0].index]; setPeriod(S.period===m?'all':m); } },   // 再點一次 = 回到全部
+      onHover:(e,el)=>{ if(e.native&&e.native.target) e.native.target.style.cursor=el.length?'pointer':'default'; },
+      scales:{y:{stacked:true,beginAtZero:true,ticks:{callback:v=>'¥'+compact(v),maxTicksLimit:4},grid:{color:'#eceee9'},border:{display:false}},
+              x:{stacked:true,grid:{display:false},border:{display:false}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c2=>`${c2.dataset.label}: ${fmtY(c2.parsed.y)}`,footer:items=>'合計 '+fmtY(items.reduce((a,b)=>a+b.parsed.y,0))}}}}});
+  S.charts.push(ch); redrawAfterFonts(ch);
+  // 月份多到要橫捲時，把選中（或最新）的月份捲進畫面
+  const sc=document.getElementById('monthScroll');
+  if(sc&&sc.scrollWidth>sc.clientWidth){ const i=fm?months.indexOf(fm):months.length-1; sc.scrollLeft=Math.max(0,(i+.5)/months.length*sc.scrollWidth-sc.clientWidth/2); }
 }
 function toggleIn(arr,v){ const i=arr.indexOf(v); if(i>=0) arr.splice(i,1); else arr.push(v); }
 function refreshListControls(){
-  document.querySelectorAll('[data-sort]').forEach(b=>b.classList.toggle('active',b.dataset.sort===S.sortBy));
-  const dir=document.getElementById('dirBtn'); if(dir) dir.innerHTML=ic(S.sortDir==='desc'?'arrow_downward':'arrow_upward');
   const noFilter=!S.fKinds.length&&!S.fCats.length;
+  const set=(b,on)=>{ b.classList.toggle('active',on); b.setAttribute('aria-pressed',on); };
   const allB=document.querySelector('[data-all]'); if(allB) allB.classList.toggle('active',noFilter);
-  document.querySelectorAll('[data-kind]').forEach(b=>b.classList.toggle('active',S.fKinds.includes(b.dataset.kind)));
-  document.querySelectorAll('[data-cat]').forEach(b=>b.classList.toggle('active',S.fCats.includes(b.dataset.cat)));
+  document.querySelectorAll('[data-kind]').forEach(b=>set(b,S.fKinds.includes(b.dataset.kind)));
+  document.querySelectorAll('[data-cat]').forEach(b=>set(b,S.fCats.includes(b.dataset.cat)));
+  document.querySelectorAll('[data-view]').forEach(b=>set(b,S.listView===b.dataset.view));
+  const sb=document.getElementById('sortBtn'); if(sb){ const l=(SORTS.find(s=>s[0]===S.sort)||SORTS[0])[1]; sb.querySelector('span:last-child').textContent=l; sb.setAttribute('aria-label',`排序：${l}，點一下換排序`); }
   renderListBody();
+}
+function filteredRows(){
+  let rows=applyFilters(S.tx,{period:S.period,exclude:S.exclude}).slice();
+  if(S.fKinds.length) rows=rows.filter(t=>S.fKinds.includes(t.kind));
+  if(S.fCats.length) rows=rows.filter(t=>S.fCats.includes(t.cat));
+  const q=S.search.trim().toLowerCase();
+  if(q) rows=rows.filter(t=>`${t.desc} ${t.cat} ${t.payer} ${t.method}`.toLowerCase().includes(q));
+  const [k,d]=S.sort.split('-'), dir=d==='desc'?-1:1;
+  const cmp=(a,b)=>(k==='amt'?a.amt-b.amt:(a.date?.sort||0)-(b.date?.sort||0))||(a.id-b.id);
+  return rows.sort((a,b)=>cmp(a,b)*dir);
+}
+function listRows(){
+  const rows=filteredRows();
+  if(!rows.length) return emptyState('search_off','找不到符合的交易','換個關鍵字，或點「全部」清除篩選');
+  const sum=rows.reduce((a,b)=>a+b.amt,0), photos=rows.filter(t=>t.rc);
+  const head=summaryCard(rows,sum,photos.length);
+  if(S.listView==='photo')
+    return head+(photos.length?`<div class="rc-grid" data-seq="photo">${photos.map(rcTile).join('')}</div>`
+      :emptyState('photo_library','沒有收據照片','在 LINE 傳收據給記帳機器人，照片會自動出現在這裡'));
+  if(S.sort.startsWith('date')){
+    const g=new Map(); for(const t of rows){ const k=t.date?t.date.iso:'—'; if(!g.has(k)) g.set(k,[]); g.get(k).push(t); }
+    const groups=[...g.values()].map(ts=>`<div class="daygroup"><div class="dayhead"><span class="d">${ts[0].date?dayLabel(ts[0].date):'無日期'}</span><span class="t num">${fmtY(ts.reduce((a,b)=>a+b.amt,0))}</span></div>${ts.map(t=>txRow(t,false)).join('')}</div>`).join('');
+    return head+`<div class="card pad-sm" data-seq="list">${groups}</div>`;
+  }
+  return head+`<div class="card pad-sm" data-seq="list">${rows.map(t=>txRow(t,true)).join('')}</div>`;
 }
 function renderListBody(){ const el=document.getElementById('listBody'); if(el) el.innerHTML=listRows(); }
 
+const PAY_META={'現金':{ic:'payments',c:'#9fe870'},'信用卡':{ic:'credit_card',c:'#163300'},'SUICA':{ic:'contactless',c:'#74b84b'},'銀行轉帳':{ic:'account_balance',c:'#8a9282'},'轉帳':{ic:'account_balance',c:'#8a9282'},'電子支付':{ic:'qr_code_2',c:'#bfe4a1'}};
+function payMeta(m){ return PAY_META[m]||{ic:'more_horiz',c:'#c2c6bc'}; }
+/* 筆數＋總額＋付款方式，一張精簡卡 */
+function summaryCard(rows,sum,nPhoto){
+  const by={}; for(const t of rows){ const m=t.method||'其他'; by[m]=(by[m]||0)+t.amt; }
+  const order=Object.entries(by).sort((a,b)=>b[1]-a[1]);
+  const segs=order.map(([m,v])=>`<i style="width:${pct(v,sum)}%;background:${payMeta(m).c}" title="${esc(m)} ${fmtY(v)}"></i>`).join('');
+  const legend=order.map(([m,v])=>{ const md=payMeta(m); return `<span class="pl"><span class="pay-ic" style="color:${md.c}">${ic(md.ic,'fill')}</span>${esc(m)} <b class="num">${fmtY(v)}</b></span>`; }).join('');
+  return `<div class="card pad-sm pay-card">
+    <div class="pay-head"><span class="num"><b>${rows.length}</b> 筆${nPhoto?` · <b>${nPhoto}</b> 張照片`:''}</span><span class="num pay-sum">${fmtY(sum)}</span></div>
+    <div class="pay-bar" role="img" aria-label="付款方式比例：${esc(order.map(([m,v])=>`${m} ${pct(v,sum).toFixed(0)}%`).join('、'))}">${segs}</div>
+    <div class="pay-legend">${legend}</div>
+  </div>`;
+}
+
 /* =========================================================================
-   Shared
+   Shared rows / tiles
    ========================================================================= */
+/* 交易列：標題只放店名（品項在詳情裡）；有收據就用照片縮圖當頭像；整列可點開詳情 */
 function txRow(t,showDate){
-  return `<div class="tx"><div class="ico sm">${ic(catIcon(t.cat))}</div>
-    <div class="body"><div class="t1">${esc(t.desc||t.cat)}</div>
-    <div class="t2"><span class="tag ${t.kind==='共同'?'c':''}">${esc(t.kind||'—')}</span><span>${esc(t.cat)}</span><span>·</span><span>${esc(t.payer||'—')}</span>${showDate&&t.date?`<span>·</span><span>${t.date.iso.slice(5)}</span>`:''}</div></div>
+  const lead=t.rc
+    ?`<span class="thumb"><img src="${esc(thumbOf(t.rc))}" data-full="${esc(t.rc)}" alt="" loading="lazy" decoding="async" onerror="thumbErr(this)"></span>`
+    :`<span class="ico">${ic(catIcon(t.cat))}</span>`;
+  return `<div class="tx" data-tx="${t.id}" role="button" tabindex="0" aria-label="${esc(`${storeOf(t)} ${fmtY(t.amt)}${t.rc?'，有收據照片':''}`)}">${lead}
+    <div class="body"><div class="t1">${esc(storeOf(t))}</div>
+    <div class="t2"><span class="tag ${t.kind==='共同'?'c':''}">${esc(t.kind||'—')}</span><span>${esc(t.cat)}</span><span>·</span><span>${esc(t.payer||'—')}</span>${showDate&&t.date?`<span>·</span><span>${t.date.m}/${t.date.d}</span>`:''}</div></div>
     <div class="amt num">${fmtY(t.amt)}</div></div>`;
 }
+function rcTile(t){
+  return `<button class="rc" data-tx="${t.id}" aria-label="${esc(`${storeOf(t)} ${fmtY(t.amt)} ${t.date?t.date.iso:''}，收據照片`)}">
+    <img src="${esc(thumbOf(t.rc))}" data-full="${esc(t.rc)}" alt="" loading="lazy" decoding="async" onerror="thumbErr(this)">
+    <span class="rc-cap"><b class="num">${fmtY(t.amt)}</b><span>${esc(storeOf(t))}</span></span></button>`;
+}
 function emptyRow(){ return `<div class="empty">沒有資料</div>`; }
+function emptyState(icn,title,hint){ return `<div class="card"><div class="empty-state">${ic(icn)}<b>${title}</b>${hint?`<span>${hint}</span>`:''}</div></div>`; }
 function skeleton(){ return `<div class="card dark" style="height:140px"></div>
   <div class="grid g-2"><div class="card"><div class="skel" style="height:70px"></div></div><div class="card"><div class="skel" style="height:70px"></div></div></div>
   <div class="card"><div class="skel" style="height:18px;margin:6px 0;width:60%"></div><div class="skel" style="height:18px;margin:6px 0"></div><div class="skel" style="height:18px;margin:6px 0;width:75%"></div></div>`; }
@@ -634,14 +514,127 @@ function errorState(){ return `<div class="card" style="text-align:center;paddin
   <div class="ico" style="margin:0 auto 12px;width:52px;height:52px">${ic('cloud_off')}</div>
   <h2>讀不到試算表</h2><p class="sub" style="margin-top:6px">${esc(S.error||'')}</p>
   <p style="color:var(--mute);font-size:12.5px;margin-top:10px">請確認試算表共用為「知道連結的任何人 → 檢視者」</p>
-  <div style="margin-top:16px"><button class="chip active" onclick="loadData(true)">重新嘗試</button> <a class="chip" href="${CONFIG.sheetUrl}" target="_blank">開啟試算表</a></div></div>`; }
+  <div style="margin-top:16px"><button class="chip active" onclick="loadData(true)">重新嘗試</button> <a class="chip" href="${CONFIG.sheetUrl}" target="_blank" rel="noopener">開啟試算表</a></div></div>`; }
+
+/* =========================================================================
+   詳情 — 點任何一筆：收據大圖（左右切換）＋金額、店名、日期、品項
+   ========================================================================= */
+const DT={el:null,open:false,seq:[],i:0,ret:null};
+function bindDetail(){
+  const v=document.getElementById('view');
+  const openFrom=el=>{
+    const box=el.closest('[data-seq]');
+    const ids=box?[...document.querySelectorAll(`#view [data-seq="${box.dataset.seq}"] [data-tx]`)].map(x=>+x.dataset.tx):[+el.dataset.tx];
+    openDetail(+el.dataset.tx,ids);
+  };
+  v.addEventListener('click',e=>{ const el=e.target.closest('[data-tx]'); if(el) openFrom(el); });
+  v.addEventListener('keydown',e=>{ if((e.key==='Enter'||e.key===' ')&&e.target.matches('.tx[data-tx]')){ e.preventDefault(); openFrom(e.target); } });
+  addEventListener('popstate',()=>{ if(DT.open) closeDetail(true); });   // 手機返回鍵／返回手勢 = 關閉詳情，不離開頁面
+  document.addEventListener('keydown',e=>{
+    if(!DT.open) return;
+    if(e.key==='Escape'){ e.preventDefault(); closeDetail(); }
+    else if(e.key==='ArrowLeft') stepDetail(-1);
+    else if(e.key==='ArrowRight') stepDetail(1);
+    else if(e.key==='Tab'){   // 焦點留在視窗內
+      const f=[...DT.el.querySelectorAll('button:not([disabled]),a[href]')].filter(x=>x.offsetParent);
+      if(!f.length) return; const a=f[0], z=f[f.length-1];
+      if(e.shiftKey&&document.activeElement===a){ e.preventDefault(); z.focus(); }
+      else if(!e.shiftKey&&document.activeElement===z){ e.preventDefault(); a.focus(); }
+    }
+  });
+}
+function buildDetailEl(){
+  const el=document.createElement('div');
+  el.className='dt'; el.hidden=true;
+  el.setAttribute('role','dialog'); el.setAttribute('aria-modal','true'); el.setAttribute('aria-labelledby','dtTitle');
+  el.innerHTML=`
+    <div class="dt-top">
+      <span class="dt-count num"></span>
+      <a class="dt-btn dt-orig" target="_blank" rel="noopener" aria-label="開啟原圖">${ic('open_in_new')}</a>
+      <button class="dt-btn dt-close" aria-label="關閉">${ic('close')}</button>
+    </div>
+    <div class="dt-stage">
+      <div class="dt-img"></div>
+      <button class="dt-nav prev" aria-label="上一筆">${ic('chevron_left')}</button>
+      <button class="dt-nav next" aria-label="下一筆">${ic('chevron_right')}</button>
+    </div>
+    <div class="dt-info"></div>`;
+  el.querySelector('.dt-close').onclick=()=>closeDetail();
+  el.querySelector('.prev').onclick=()=>stepDetail(-1);
+  el.querySelector('.next').onclick=()=>stepDetail(1);
+  el.querySelector('.dt-stage').addEventListener('click',e=>{ if(e.target.classList.contains('dt-stage')||e.target.classList.contains('dt-img')||e.target.closest('.dt-noimg')) closeDetail(); });   // 點照片外的暗處 = 關閉
+  // 手機：左右滑換一筆、往下滑關閉
+  let st=null; const stage=el.querySelector('.dt-stage');
+  stage.addEventListener('touchstart',e=>{ st=e.touches.length===1?{x:e.touches[0].clientX,y:e.touches[0].clientY}:null; },{passive:true});
+  stage.addEventListener('touchend',e=>{ if(!st) return; const dx=e.changedTouches[0].clientX-st.x, dy=e.changedTouches[0].clientY-st.y; st=null;
+    if(Math.abs(dx)>50&&Math.abs(dx)>1.5*Math.abs(dy)) stepDetail(dx<0?1:-1);
+    else if(dy>90&&dy>1.5*Math.abs(dx)) closeDetail(); },{passive:true});
+  document.body.appendChild(el);
+  return el;
+}
+function openDetail(id,seq){
+  if(!S.tx[id]) return;
+  DT.el=DT.el||buildDetailEl();
+  DT.seq=(seq&&seq.includes(id))?seq:[id]; DT.i=DT.seq.indexOf(id);
+  if(!DT.open){
+    DT.ret=document.activeElement; DT.open=true;
+    history.pushState({dt:1},'');
+    DT.el.hidden=false; document.body.classList.add('dt-lock');
+    requestAnimationFrame(()=>DT.el.classList.add('on'));
+  }
+  renderDetail();
+  DT.el.querySelector('.dt-close').focus({preventScroll:true});
+}
+function closeDetail(fromPop){
+  if(!DT.open) return;
+  DT.open=false;
+  DT.el.classList.remove('on'); document.body.classList.remove('dt-lock');
+  setTimeout(()=>{ if(!DT.open) DT.el.hidden=true; },160);
+  if(!fromPop&&history.state&&history.state.dt) history.back();
+  if(DT.ret&&document.contains(DT.ret)) DT.ret.focus({preventScroll:true});
+}
+function stepDetail(d){ const n=DT.i+d; if(!DT.open||n<0||n>=DT.seq.length) return; DT.i=n; renderDetail(); }
+function itemRow(s){
+  const m=s.match(/^(.*?)\s*[:：]?\s*[¥￥]\s*([\d,]+(?:\.\d+)?)\s*$/);
+  return m?`<li><span>${esc(m[1]||'—')}</span><span class="num">¥${esc(m[2])}</span></li>`:`<li><span>${esc(s)}</span></li>`;
+}
+function renderDetail(){
+  const t=S.tx[DT.seq[DT.i]]; if(!t) return closeDetail();
+  const el=DT.el, items=itemsOf(t), n=DT.seq.length;
+  el.classList.toggle('no-img',!t.rc);
+  el.querySelector('.dt-count').textContent=n>1?`${DT.i+1} / ${n}`:'';
+  const orig=el.querySelector('.dt-orig'); if(t.rc){ orig.href=t.rc; orig.hidden=false; } else { orig.removeAttribute('href'); orig.hidden=true; }
+  el.querySelector('.prev').disabled=DT.i<=0;
+  el.querySelector('.next').disabled=DT.i>=n-1;
+  el.querySelectorAll('.dt-nav').forEach(b=>b.hidden=n<2);
+  const box=el.querySelector('.dt-img');
+  box.style.backgroundImage=t.rc?`url("${thumbOf(t.rc)}")`:'none';   // 先顯示縮圖，原圖載好再蓋上
+  box.innerHTML=t.rc
+    ?`<img src="${esc(t.rc)}" alt="${esc(storeOf(t))} 收據照片" onload="this.classList.add('ok')" onerror="this.parentNode.style.backgroundImage='none';this.outerHTML='<div class=&quot;dt-noimg&quot;><span class=&quot;ms&quot;>broken_image</span>照片載入失敗</div>'">`
+    :`<div class="dt-noimg">${ic('hide_image')}<span>沒有收據照片</span></div>`;
+  el.querySelector('.dt-info').innerHTML=`
+    <div class="dt-amt num">${fmtY(t.amt)}</div>
+    <div class="dt-store" id="dtTitle">${esc(storeOf(t))}</div>
+    <div class="dt-meta">
+      ${t.date?`<span>${ic('event')}${t.date.iso}</span>`:''}
+      <span>${ic(catIcon(t.cat))}${esc(t.cat)}</span>
+      <span>${ic('person')}${esc(t.payer||'—')}</span>
+      <span>${ic(payMeta(t.method||'其他').ic)}${esc(t.method||'—')}</span>
+      <span class="${t.kind==='共同'?'c':''}">${ic(t.kind==='共同'?'group':'person_outline')}${esc(t.kind||'—')}</span>
+    </div>
+    ${items.length?`<ul class="dt-items">${items.map(itemRow).join('')}</ul>`:''}`;
+  el.querySelector('.dt-info').scrollTop=0;
+  // 預載前後一筆的原圖，左右切換不用等
+  [DT.seq[DT.i-1],DT.seq[DT.i+1]].forEach(j=>{ const x=S.tx[j]; if(x&&x.rc){ const im=new Image(); im.decoding='async'; im.src=x.rc; } });
+}
 
 /* global handlers */
 function go(tab){
   if(S.tab===tab){ window.scrollTo({top:0,behavior:'smooth'}); return; }
   location.hash='#/'+tab;   // hashchange 觸發 render；瀏覽器返回鍵可用
 }
-function setPeriod(m){ S.period=m; buildPeriod(); renderView(); window.scrollTo({top:0,behavior:'smooth'}); }
+function setPeriod(m){ S.period=m; buildPeriod(); renderView(); }
 function setSplitView(m){ S.splitView=m; savePrefs(); renderView(); }
+function showCategory(n){ S.fCats=[n]; S.fKinds=[]; S.search=''; S.listView='list'; if(S.tab==='list') renderView(); else go('list'); }
 
 document.addEventListener('DOMContentLoaded',boot);
